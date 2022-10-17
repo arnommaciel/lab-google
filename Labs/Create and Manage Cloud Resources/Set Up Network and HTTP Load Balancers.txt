@@ -1,0 +1,192 @@
+Defina a zona padrão no Cloud Shell:
+gcloud config set compute/zone us-east4-c
+
+Defina a região padrão:
+gcloud config set compute/region us-east4
+
+
+Crie uma máquina virtual www1 na zona padrão:
+gcloud compute instances create www1 \
+    --zone=us-east4-c \
+    --tags=network-lb-tag \
+    --machine-type=e2-medium \
+    --image-family=debian-11 \
+    --image-project=debian-cloud \
+    --metadata=startup-script='#!/bin/bash
+      apt-get update
+      apt-get install apache2 -y
+      service apache2 restart
+      echo "
+<h3>Servidor da Web: www1</h3>" | tee /var/www/html/index.html'
+
+Crie uma máquina virtual www2 na zona padrão:
+gcloud compute instances create www2 \
+    --zone=us-east4-c \
+    --tags=network-lb-tag \
+    --machine-type=e2-medium \
+    --image-family=debian-11 \
+    --image-project=debian-cloud \
+    --metadata=startup-script='#!/bin/bash
+      apt-get update
+      apt-get install apache2 -y
+      service apache2 restart
+      echo "
+<h3>Servidor da Web: www2</h3>" | tee /var/www/html/index.html'
+
+Crie uma máquina virtual www3 na zona padrão:
+gcloud compute instances create www3 \
+    --zone=us-east4-c \
+    --tags=network-lb-tag \
+    --machine-type=e2-medium \
+    --image-family=debian-11 \
+    --image-project=debian-cloud \
+    --metadata=startup-script='#!/bin/bash
+      apt-get update
+      apt-get install apache2 -y
+      service apache2 restart
+      echo "
+<h3>Servidor da Web: www3</h3>" | tee /var/www/html/index.html'
+
+Crie uma regra de firewall para permitir o tráfego externo para as instâncias de VM:
+gcloud compute firewall-rules create www-firewall-network-lb \
+    --target-tags network-lb-tag --allow tcp:80
+
+
+
+
+===============================================================================
+Configurar o serviço de balanceamento de carga
+
+# Crie um endereço IP externo estático para o balanceador de carga.
+gcloud compute addresses create network-lb-ip-1 \
+    --region us-east4
+
+
+# Adicione um recurso legado de verificação de integridade HTTP.
+gcloud compute http-health-checks create basic-check
+
+
+# Adicione um pool de destino na mesma região de suas instâncias. Execute o comando a seguir para criar o pool de destino e usar a verificação de integridade necessária para o funcionamento do serviço:
+gcloud compute target-pools create www-pool \
+    --region us-east4 --http-health-check basic-check
+
+# Adicione as instâncias ao pool:
+gcloud compute target-pools add-instances www-pool \
+    --instances www1,www2,www3
+
+
+# Adicione uma regra de encaminhamento:
+gcloud compute forwarding-rules create www-rule \
+    --region  us-east4 \
+    --ports 80 \
+    --address network-lb-ip-1 \
+    --target-pool www-pool
+
+
+=================================================================================
+Como enviar tráfego às instâncias
+
+# Execute o comando a seguir para visualizar o endereço IP externo da regra de encaminhamento www-rule usada pelo balanceador de carga:
+gcloud compute forwarding-rules describe www-rule --region us-east4
+
+# Acesse o endereço IP externo:
+IPADDRESS=$(gcloud compute forwarding-rules describe www-rule --region us-east4 --format="json" | jq -r .IPAddress)
+
+# Use o comando curl para acessar o endereço IP externo e substitua IP_ADDRESS por um endereço IP externo do comando anterior:
+while true; do curl -m1 $IPADDRESS; done
+
+
+=================================================================================
+Criar um balanceador de carga HTTP
+
+# Crie primeiro o modelo do balanceador de carga:
+gcloud compute instance-templates create lb-backend-template \
+   --network=default \
+   --subnet=default \
+   --tags=allow-health-check \
+   --machine-type=e2-medium \
+   --image-family=debian-11 \
+   --image-project=debian-cloud \
+   --metadata=startup-script='#!/bin/bash
+     apt-get update
+     apt-get install apache2 -y
+     a2ensite default-ssl
+     a2enmod ssl
+     vm_hostname="$(curl -H "Metadata-Flavor:Google" \
+     http://169.254.169.254/computeMetadata/v1/instance/name)"
+     echo "Page served from: $vm_hostname" | \
+     tee /var/www/html/index.html
+     systemctl restart apache2'
+
+
+# Crie o grupo gerenciado de instâncias com base no modelo:
+gcloud compute instance-groups managed create lb-backend-group \
+   --template=lb-backend-template --size=2
+
+# Crie a regra de firewall fw-allow-health-check.
+gcloud compute firewall-rules create fw-allow-health-check \
+  --network=default \
+  --action=allow \
+  --direction=ingress \
+  --source-ranges=130.211.0.0/22,35.191.0.0/16 \
+  --target-tags=allow-health-check \
+  --rules=tcp:80
+
+Observação: a regra de entrada permite tráfego dos sistemas de verificação de integridade do Google Cloud (130.211.0.0/22 e 35.191.0.0/16). Neste laboratório, usamos a tag de destino allow-health-check para identificar as VMs.
+
+
+# Agora que as instâncias estão funcionando, configure um endereço IP externo, estático e global que seus clientes podem usar para acessar o balanceador de carga:
+gcloud compute addresses create lb-ipv4-1 \
+  --ip-version=IPV4 \
+  --global
+
+# Anote o endereço IPv4 que foi reservado:
+gcloud compute addresses describe lb-ipv4-1 \
+  --format="get(address)" \
+  --global
+
+# Crie uma verificação de integridade para o balanceador de carga:
+gcloud compute health-checks create http http-basic-check \
+  --port 80
+
+# Crie um serviço de back-end:
+gcloud compute backend-services create web-backend-service \
+  --protocol=HTTP \
+  --port-name=http \
+  --health-checks=http-basic-check \
+  --global
+
+# Adicione seu grupo de instâncias como back-end do serviço de back-end:
+gcloud compute backend-services add-backend web-backend-service \
+  --instance-group=lb-backend-group \
+  --instance-group-zone=us-east4-c \
+  --global
+
+# Crie um mapa de URLs para encaminhar as solicitações de entrada ao serviço de back-end padrão:
+gcloud compute url-maps create web-map-http \
+    --default-service web-backend-service
+
+Observação: o mapa de URL é um recurso de configuração do Google Cloud usado para rotear solicitações para serviços de back-end ou buckets de back-end. Por exemplo, com um balanceador de carga HTTP(S) externo,
+é possível usar um único mapa de URL para rotear solicitações para destinos diferentes com base nas regras configuradas no mapa de URL:
+
+# Crie um proxy HTTP de destino para encaminhar as solicitações ao mapa de URLs:
+gcloud compute target-http-proxies create http-lb-proxy \
+    --url-map web-map-http
+
+# Crie uma regra de encaminhamento global para encaminhar as solicitações recebidas para o proxy:
+gcloud compute forwarding-rules create http-content-rule \
+    --address=lb-ipv4-1\
+    --global \
+    --target-http-proxy=http-lb-proxy \
+    --ports=80
+
+
+=================================================================================
+
+Como testar o tráfego enviado às instâncias
+# No Console do Cloud, em Menu de navegação, acesse Serviços de rede > Balanceamento de carga.
+# Clique no balanceador de carga que você acabou de criar (web-map-http).
+# Na seção Back-end, clique no nome do back-end e confirme se as VMs estão Íntegras. Se não estiverem, espere alguns instantes e tente recarregar a página.
+# Quando finalmente estiverem íntegras, teste o balanceador de carga com um navegador da Web. Acesse http://IP_ADDRESS/ e substitua IP_ADDRESS pelo endereço IP do balanceador de carga.
+# Isso talvez leve de três a cinco minutos. Se a conexão falhar, aguarde um minuto e atualize o navegador.
+# O navegador deve renderizar uma página que mostra o nome e a zona da instância que a forneceu, por exemplo, Page served from: lb-backend-group-xxxx.

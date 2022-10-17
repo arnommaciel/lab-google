@@ -1,0 +1,52 @@
+go mod init valkyrie-app
+go mod tidy
+go mod download
+
+docker run -p8080:8080 gcr.io/qwiklabs-gcp-02-9bc7f9235949/valkyrie-prod:v0.0.2 &
+
+docker build -t gcr.io/qwiklabs-gcp-02-9bc7f9235949/valkyrie-prod:v0.0.2 .
+docker push gcr.io/qwiklabs-gcp-02-9bc7f9235949/valkyrie-prod:v0.0.2
+
+
+Labs code
+
+gsutil cp gs://spls/gsp051/continuous-deployment-on-kubernetes.zip .
+unzip continuous-deployment-on-kubernetes.zip
+cd continuous-deployment-on-kubernetes
+
+
+
+if [ $(docker images | grep -c "valkyrie-[dev|prod|app].*v0.0.[123]") -eq 1 ]
+then
+    echo Image exists
+    echo ok > /tmp/ok
+    gsutil cp /tmp/ok gs://${GOOGLE_CLOUD_PROJECT}-marking/step1 >& /dev/null
+    echo Go ahead and check the activity tracking on the lab page
+else
+    echo Image not found
+    gsutil rm gs://${GOOGLE_CLOUD_PROJECT}-marking/step1 >& /dev/null
+    echo Are you sure you tagged the image correctly?
+fi
+
+
+#!/bin/bash
+HTTP=$(curl -I 127.0.0.1:8080 2> /dev/null | grep -c "200 OK")
+DOCKER=$(docker ps | grep -c "valkyrie-[dev|prod|app].*v0.0.[123]")
+if [  $DOCKER -eq 1 ]
+then
+    if [ $HTTP -eq 1 ]
+    then
+        echo Container running and visible on port 8080, good job!
+        echo ok > /tmp/ok
+        gsutil cp /tmp/ok gs://${GOOGLE_CLOUD_PROJECT}-marking/step2 >& /dev/null
+        echo Go ahead and check the activity tracking on the lab page
+    else
+        echo The container is running, but the website is not published on port 8080
+        gsutil rm gs://${GOOGLE_CLOUD_PROJECT}-marking/step2 >& /dev/null
+        echo Did you publish port 8080 to port 8080?
+    fi
+else
+    echo No container running
+    gsutil rm gs://${GOOGLE_CLOUD_PROJECT}-marking/step2 >& /dev/null
+    echo Are you sure you ran the image?
+fi
