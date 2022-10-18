@@ -1,0 +1,373 @@
+Ative as APIs do Google
+Duas APIs foram ativadas para este laboratório:
+
+Nome	API
+Cloud Build	cloudbuild.googleapis.com
+Cloud Run	run.googleapis.com
+Como desenvolver a API REST
+Ative o projeto:
+
+gcloud config set project $(gcloud projects list --format='value(PROJECT_ID)' --filter='qwiklabs-gcp')
+Clone o repositório da teoria pet-theory e acessar o código fonte:
+
+git clone https://github.com/rosera/pet-theory.git && cd pet-theory/lab08
+Use seu editor de texto favorito, ou use o botão Editor de código na faixa do Cloud Shell, para ver o arquivo go.mod e go.sum
+
+Crie o arquivo main.go e adicione o conteúdo abaixo ao arquivo:
+
+package main
+import (
+  "fmt"
+  "log"
+  "net/http"
+  "os"
+)
+func main() {
+  port := os.Getenv("PORT")
+  if port == "" {
+      port = "8080"
+  }
+  http.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
+      fmt.Fprintf(w, "{status: 'running'}")
+  })
+  log.Println("Pets REST API listening on port", port)
+  if err := http.ListenAndServe(":"+port, nil); err != nil {
+      log.Fatalf("Error launching Pets REST API server: %v", err)
+  }
+}
+No código acima, crie um endpoint para testar se o serviço está funcionando conforme o esperado. Se quiser, insira "/v1/" no URL do serviço para ver se o aplicativo está funcionando corretamente. Como o Cloud Run implanta contêineres, é necessário apresentar uma definição de contêiner. Um arquivo chamado "Dockerfile" informa ao Cloud Run qual versão do Go usar, quais arquivos incluir no aplicativo e como iniciar o código.
+Agora crie um arquivo com o nome Dockerfile e inclua este código nele:
+
+FROM gcr.io/distroless/base-debian10
+WORKDIR /usr/src/app
+COPY server .
+CMD [ "/usr/src/app/server" ]
+O arquivo server é o binário de execução criado em main.go.
+
+Execute o comando a seguir para criar o binário:
+
+go build -o server
+Depois de executar o comando build, confirme que o Dockerfile e o servidor estão no mesmo diretório:
+
+ls -la
+(Saída)
+
+ .
+ ├── Dockerfile
+ ├── go.mod
+ ├── go.sum
+ ├── main.go
+ └── server
+Um Dockerfile modelo como o acima normalmente é usado sem alterações para a maioria dos apps do Cloud Run baseados em Go.
+
+Para implantar sua API REST simples, basta executar:
+
+gcloud builds submit \
+  --tag gcr.io/$GOOGLE_CLOUD_PROJECT/rest-api:0.1
+Esse comando cria um contêiner com seu código e o coloca no Container Registry do projeto. Clique em Menu de navegação > Container Registry para ver o contêiner. Se rest-api não aparecer, clique em Atualizar.
+
+257a753ca66351a2.png
+
+Clique em Verificar meu progresso para confirmar que você concluiu a tarefa acima.
+
+Crie uma imagem com o Cloud Build
+Depois que o contêiner for criado, implante-o:
+
+gcloud run deploy rest-api \
+  --image gcr.io/$GOOGLE_CLOUD_PROJECT/rest-api:0.1 \
+  --platform managed \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --max-instances=2
+Quando a implantação estiver concluída, você vai receber uma mensagem como esta:
+
+Service [rest-api] revision [rest-api-00001] has been deployed and is serving
+traffic at https://rest-api-[hash].a.run.app
+Clique em Verificar meu progresso para confirmar que você concluiu a tarefa acima.
+
+Serviço da API REST implantado
+Clique no URL do serviço que aparece no fim dessa mensagem para abri-lo em uma nova guia do navegador. Insira /v1/ no final do URL e pressione Enter. Você vai receber esta mensagem:
+78baff71ad9313e1.png
+
+A API REST está configurada e em execução. Na próxima seção, a API vai ser usada para recuperar informações de clientes fictícios de um banco de dados do Firestore com o serviço de protótipo disponível.
+
+Importe os dados dos clientes fictícios para fazer os testes
+imagem
+
+Raquel, consultora de software
+
+Olá, Pedro,
+
+Você ainda tem os pseudodados dos clientes que criamos? Precisaremos deles para os testes.
+
+Você ainda se lembra de como configurar um banco de dados do Firestore e importar as informações?
+
+Raquel
+
+imagem
+
+Pedro, administrador de TI
+
+Oi, Raquel,
+
+Sim, ainda tenho os dados de teste. Eu vou transferi-los para o Firestore hoje para fazermos os testes.
+
+Pedro
+
+Raquel e Pedro já criaram um banco de dados de teste com 10 clientes, que inclui alguns tratamentos propostos para o gato de um cliente.
+
+Ajude Pedro a configurar o banco de dados do Firestore e a importar os dados de teste dos clientes. Primeiro ative o Firestore no projeto.
+
+Volte ao Console do Cloud e clique em Menu de navegação > Firestore.
+841c521f01659814.png
+
+Clique no botão Selecionar Modo nativo.
+64b48305e0a14757.png
+
+Selecione o local como a multirregião "nam5 (Estados Unidos)" no início da lista.
+Clique no botão Criar banco de dados.
+Aguarde o banco de dados ser criado.
+Clique em Verificar meu progresso para confirmar que você concluiu a tarefa acima.
+
+Banco de dados do Firestore criado
+Migre os arquivos de importação para um bucket do Cloud Storage criado para você:
+
+gsutil cp -r gs://spls/gsp645/2019-10-06T20:10:37_43617 gs://$GOOGLE_CLOUD_PROJECT-customer
+Agora importe estes dados para o Firebase:
+
+gcloud beta firestore import gs://$GOOGLE_CLOUD_PROJECT-customer/2019-10-06T20:10:37_43617/
+Atualize o navegador do Console do Cloud para ver os resultados do Firestore.
+
+No Firestore, clique em clientes na seção "Raiz". Você vai ver que os dados dos animais de estimação foram importados, como mostra a captura de tela abaixo. Se quiser, navegue para ver as informações. Caso não veja os dados, atualize a página.
+b34f484ce74664d2.png
+
+Bom trabalho! O banco de dados do Firestore foi criado e preenchido com os dados de teste.
+
+Conecte a API REST ao banco de dados do Firestore
+imagem
+
+Raquel, consultora de software
+
+Oi, Lilian,
+
+Só queria avisar que Pedro e eu concluímos as duas primeiras tarefas da lista.
+
+Agora vou estruturar a API REST para acessar os dados dos clientes no Firestore.
+
+Raquel
+
+imagem
+
+Lilian, fundadora da Pet Theory
+
+Oi, Raquel,
+
+Ótimo trabalho! Mal posso esperar para ver como será na próxima etapa.
+
+Lilian
+
+Nesta seção, você vai ajudar a Raquel a criar outro endpoint na API REST com a seguinte aparência:
+
+https://rest-api-[hash].a.run.app/v1/customer/22530
+Por exemplo, o URL deve retornar o total de tratamentos propostos e quantos foram aceitos e rejeitados pelo cliente com o ID 22530, se essas informações estiverem no banco de dados do Firestore:
+
+{
+  "status": "success",
+  "data": {
+    "proposed": 1602,
+    "approved": 585,
+    "rejected": 489
+  }
+}
+Se o cliente não estiver no banco de dados, você vai ver o código de status 404 (não encontrado) e uma mensagem de erro.
+Essa nova funcionalidade requer um pacote de acesso ao banco de dados do Firestore e outro que lida com o compartilhamento de recursos entre origens (CORS, na sigla em inglês).
+
+Descubra o valor da variável de ambiente $GOOGLE_CLOUD_PROJECT
+echo $GOOGLE_CLOUD_PROJECT
+Abra o arquivo main.go no diretório pet-theory/lab08.
+Atualize o conteúdo de main.go com o valor exibido para $GOOGLE_CLOUD_PROJECT
+Substitua o conteúdo do arquivo pelo código abaixo e, em seguida, substitua o PROJECT_ID:
+
+package main
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"cloud.google.com/go/firestore"
+	"github.com/gorilla/handlers"
+	"github.com/gorilla/mux"
+	"google.golang.org/api/iterator"
+)
+var client *firestore.Client
+func main() {
+	var err error
+	ctx := context.Background()
+	client, err = firestore.NewClient(ctx, "PROJECT_ID")
+	if err != nil {
+	log.Fatalf("Error initializing Cloud Firestore client: %v", err)
+	}
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	r := mux.NewRouter()
+	r.HandleFunc("/v1/", rootHandler)
+	r.HandleFunc("/v1/customer/{id}", customerHandler)
+	log.Println("Pets REST API listening on port", port)
+	cors := handlers.CORS(
+		handlers.AllowedHeaders([]string{"X-Requested-With", "Authorization", "Origin"}),
+		handlers.AllowedOrigins([]string{"https://storage.googleapis.com"}),
+		handlers.AllowedMethods([]string{"GET", "HEAD", "POST", "OPTIONS", "PATCH", "CONNECT"}),
+	)
+	if err := http.ListenAndServe(":"+port, cors(r)); err != nil {
+		log.Fatalf("Error launching Pets REST API server: %v", err)
+	}
+}
+Adicione o suporte ao gerenciador no final do arquivo:
+
+func rootHandler(w http.ResponseWriter, r *http.Request) {
+  fmt.Fprintf(w, "{status: 'running'}")
+}
+func customerHandler(w http.ResponseWriter, r *http.Request) {
+  id := mux.Vars(r)["id"]
+  ctx := context.Background()
+  customer, err := getCustomer(ctx, id)
+  if err != nil {
+    w.WriteHeader(http.StatusInternalServerError)
+    fmt.Fprintf(w, `{"status": "fail", "data": '%s'}`, err)
+    return
+  }
+  if customer == nil {
+    w.WriteHeader(http.StatusNotFound)
+    msg := fmt.Sprintf("`Customer \"%s\" not found`", id)
+    fmt.Fprintf(w, fmt.Sprintf(`{"status": "fail", "data": {"title": %s}}`, msg))
+    return
+  }
+  amount, err := getAmounts(ctx, customer)
+  if err != nil {
+    w.WriteHeader(http.StatusInternalServerError)
+    fmt.Fprintf(w, `{"status": "fail", "data": "Unable to fetch amounts: %s"}`, err)
+    return
+  }
+  data, err := json.Marshal(amount)
+  if err != nil {
+    w.WriteHeader(http.StatusInternalServerError)
+    fmt.Fprintf(w, `{"status": "fail", "data": "Unable to fetch amounts: %s"}`, err)
+    return
+  }
+  fmt.Fprintf(w, fmt.Sprintf(`{"status": "success", "data": %s}`, data))
+}
+Adicione o suporte ao cliente depois:
+
+type Customer struct {
+  Email string `firestore:"email"`
+  ID    string `firestore:"id"`
+  Name  string `firestore:"name"`
+  Phone string `firestore:"phone"`
+}
+func getCustomer(ctx context.Context, id string) (*Customer, error) {
+  query := client.Collection("customers").Where("id", "==", id)
+  iter := query.Documents(ctx)
+  var c Customer
+  for {
+    doc, err := iter.Next()
+    if err == iterator.Done {
+	break
+    }
+    if err != nil {
+	return nil, err
+    }
+    err = doc.DataTo(&c)
+    if err != nil {
+	return nil, err
+    }
+  }
+  return &c, nil
+}
+func getAmounts(ctx context.Context, c *Customer) (map[string]int64, error) {
+  if c == nil {
+    return map[string]int64{}, fmt.Errorf("Customer should be non-nil: %v", c)
+  }
+  result := map[string]int64{
+    "proposed": 0,
+    "approved": 0,
+    "rejected": 0,
+  }
+  query := client.Collection(fmt.Sprintf("customers/%s/treatments", c.Email))
+  if query == nil {
+    return map[string]int64{}, fmt.Errorf("Query is nil: %v", c)
+  }
+  iter := query.Documents(ctx)
+  for {
+    doc, err := iter.Next()
+    if err == iterator.Done {
+	break
+    }
+    if err != nil {
+	return nil, err
+    }
+    treatment := doc.Data()
+    result[treatment["status"].(string)] += treatment["cost"].(int64)
+  }
+  return result, nil
+}
+Salve o arquivo.
+
+Teste rápido
+
+Qual função responde aos URLs com o padrão `/v1/customer/`?
+
+customerHandler
+
+getAmounts
+
+Qual instrução retorna "success" para o cliente?
+
+fmt.Fprintf(w, fmt.Sprintf(`{"status": "success", "data": %s}
+
+fmt.Fprintf(w, `{"status": "fail", "data": "Unable to fetch amounts: %s"}
+
+Quais funções leem as informações no banco de dados do Firestore?
+
+getCustomer e getAmounts
+
+customerHandler e getCustomer
+Como implantar uma nova revisão
+Recrie o código-fonte:
+
+go build -o server
+Crie uma nova imagem para a API REST:
+
+gcloud builds submit \
+  --tag gcr.io/$GOOGLE_CLOUD_PROJECT/rest-api:0.2
+Implante a imagem atualizada:
+
+gcloud run deploy rest-api \
+  --image gcr.io/$GOOGLE_CLOUD_PROJECT/rest-api:0.2 \
+  --platform managed \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --max-instances=2
+Clique em Verificar meu progresso para confirmar que você concluiu a tarefa acima.
+
+Revisão de imagem do build 0.2
+Quando a implantação estiver concluída, você vai receber uma mensagem semelhante à anterior. O URL da API REST não mudou com a implantação da nova versão.
+
+Service [rest-api] revision [rest-api-00002] has been deployed and is serving
+traffic at https://rest-api-[hash].a.run.app
+Volte à guia do navegador que já aponta para esse URL (com /v1 no final). Atualize a guia para receber a mesma mensagem de antes, informando que a API ainda está em execução.
+status-message.png
+
+Insira /customer/22530 no URL do aplicativo na barra de endereço do seu navegador. Você vai receber esta resposta JSON com o total dos tratamentos propostos e quantos foram aceitos e rejeitados pelo cliente:
+b3009606f951bfab.png
+
+Aqui estão alguns IDs de cliente adicionais que você pode inserir no URL em vez de 22530:
+
+34216
+70156 (todos os valores devem ser zero)
+12345 (o cliente/animal não existe, e você recebe uma mensagem de erro, como Query is nil)
+Você criou uma API REST escalonável, de baixa manutenção, sem servidor e que lê as informações de um banco de dados.
+

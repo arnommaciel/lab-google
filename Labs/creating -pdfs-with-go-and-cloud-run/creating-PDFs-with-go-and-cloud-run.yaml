@@ -1,0 +1,297 @@
+Arquitetura
+Neste laboratório, você ajudará a Pet Theory Veterinary a converter automaticamente as faturas dos clientes em formato PDF para facilitar a consulta.
+
+ba0f88b446a77423.png
+
+Use o Googleapis
+Neste laboratório, você usará as APIs do Google. As seguintes APIs foram ativadas para você:
+
+Nome	API
+Cloud Build	cloudbuild.googleapis.com
+Cloud Storage	storage-component.googleapis.com
+Cloud Run	run.googleapis.com
+Faça o download do código-fonte
+Para começar, faça o download do código necessário para este laboratório.
+
+Ative sua conta de laboratório:
+
+gcloud auth list --filter=status:ACTIVE --format="value(account)"
+Execute este comando para clonar o repositório da Pet Theory:
+
+git clone https://github.com/Deleplace/pet-theory.git
+Acesse o diretório correto:
+
+cd pet-theory/lab03
+Crie um microsserviço de fatura
+Nesta seção, você criará um aplicativo Go para processar solicitações. Conforme descrito no diagrama da arquitetura, você integrará o Cloud Storage como parte da solução.
+
+Abra o código-fonte server.go e edite-o para corresponder ao texto abaixo:
+
+package main
+import (
+      "fmt"
+      "io/ioutil"
+      "log"
+      "net/http"
+      "os"
+      "os/exec"
+      "regexp"
+      "strings"
+)
+func main() {
+      http.HandleFunc("/", process)
+      port := os.Getenv("PORT")
+      if port == "" {
+              port = "8080"
+              log.Printf("Defaulting to port %s", port)
+      }
+      log.Printf("Listening on port %s", port)
+      err := http.ListenAndServe(fmt.Sprintf(":%s", port), nil)
+      log.Fatal(err)
+}
+func process(w http.ResponseWriter, r *http.Request) {
+      log.Println("Serving request")
+      if r.Method == "GET" {
+              fmt.Fprintln(w, "Ready to process POST requests from Cloud Storage trigger")
+              return
+      }
+      //
+      // Read request body containing GCS object metadata
+      //
+      gcsInputFile, err1 := readBody(r)
+      if err1 != nil {
+              log.Printf("Error reading POST data: %v", err1)
+              w.WriteHeader(http.StatusBadRequest)
+              fmt.Fprintf(w, "Problem with POST data: %v \n", err1)
+              return
+      }
+      //
+      // Working directory (concurrency-safe)
+      //
+      localDir, errDir := ioutil.TempDir("", "")
+      if errDir != nil {
+              log.Printf("Error creating local temp dir: %v", errDir)
+              w.WriteHeader(http.StatusInternalServerError)
+              fmt.Fprintf(w, "Could not create a temp directory on server. \n")
+              return
+      }
+      defer os.RemoveAll(localDir)
+      //
+      // Download input file from GCS
+      //
+      localInputFile, err2 := download(gcsInputFile, localDir)
+      if err2 != nil {
+              log.Printf("Error downloading GCS file [%s] from bucket [%s]: %v",
+gcsInputFile.Name, gcsInputFile.Bucket, err2)
+              w.WriteHeader(http.StatusInternalServerError)
+              fmt.Fprintf(w, "Error downloading GCS file [%s] from bucket [%s]",
+gcsInputFile.Name, gcsInputFile.Bucket)
+              return
+      }
+      //
+      // Use LibreOffice to convert local input file to local PDF file.
+      //
+      localPDFFilePath, err3 := convertToPDF(localInputFile.Name(), localDir)
+      if err3 != nil {
+              log.Printf("Error converting to PDF: %v", err3)
+              w.WriteHeader(http.StatusInternalServerError)
+              fmt.Fprintf(w, "Error converting to PDF.")
+              return
+      }
+      //
+      // Upload the freshly generated PDF to GCS
+      //
+      targetBucket := os.Getenv("PDF_BUCKET")
+      err4 := upload(localPDFFilePath, targetBucket)
+      if err4 != nil {
+              log.Printf("Error uploading PDF file to bucket [%s]: %v", targetBucket, err4)
+              w.WriteHeader(http.StatusInternalServerError)
+              fmt.Fprintf(w, "Error downloading GCS file [%s] from bucket [%s]",
+gcsInputFile.Name, gcsInputFile.Bucket)
+              return
+      }
+      //
+      // Delete the original input file from GCS.
+      //
+      err5 := deleteGCSFile(gcsInputFile.Bucket, gcsInputFile.Name)
+      if err5 != nil {
+              log.Printf("Error deleting file [%s] from bucket [%s]: %v", gcsInputFile.Name,
+gcsInputFile.Bucket, err5)
+         // This is not a blocking error.
+         // The PDF was successfully generated and uploaded.
+      }
+      log.Println("Successfully produced PDF")
+      fmt.Fprintln(w, "Successfully produced PDF")
+}
+func convertToPDF(localFilePath string, localDir string) (resultFilePath string, err error) {
+      log.Printf("Converting [%s] to PDF", localFilePath)
+      cmd := exec.Command("libreoffice", "--headless", "--convert-to", "pdf",
+              "--outdir", localDir,
+              localFilePath)
+      cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+      log.Println(cmd)
+      err = cmd.Run()
+      if err != nil {
+              return "", err
+      }
+      pdfFilePath := regexp.MustCompile(`\.\w+$`).ReplaceAllString(localFilePath, ".pdf")
+      if !strings.HasSuffix(pdfFilePath, ".pdf") {
+              pdfFilePath += ".pdf"
+      }
+      log.Printf("Converted %s to %s", localFilePath, pdfFilePath)
+      return pdfFilePath, nil
+}
+Agora execute este comando para criar o aplicativo:
+
+go build -o server
+As funções chamadas por esse código de nível superior estão nos arquivos de origem:
+
+server.go
+notification.go
+gcs.go
+Depois que o aplicativo for criado, você poderá criar o serviço pdf-conversion.
+
+Crie o serviço pdf-conversion
+O serviço de PDF usará o Cloud Run e o Cloud Storage para iniciar um processo toda vez que for feito o upload de um arquivo no armazenamento designado.
+
+Para isso, você usará um padrão comum de notificações de eventos com o Cloud Pub/Sub. Assim, o aplicativo realiza apenas o processamento das informações. O transporte e a transmissão de informações são feitos por outros serviços, o que mantém o aplicativo simples.
+
+A criação do módulo de fatura requer a integração de dois componentes:
+
+e12b586bd99ea82d.png
+
+Adicione o pacote do LibreOffice para usar no seu aplicativo.
+
+Abra o manifesto do Dockerfile e atualize o arquivo da seguinte maneira:
+
+FROM debian:buster
+RUN apt-get update -y \
+  && apt-get install -y libreoffice \
+  && apt-get clean
+WORKDIR /usr/src/app
+COPY server .
+CMD [ "./server" ]
+Salve o Dockerfile atualizado.
+
+Inicie a recriação da imagem pdf-converter usando o Cloud Build:
+
+gcloud builds submit \
+  --tag gcr.io/$GOOGLE_CLOUD_PROJECT/pdf-converter
+Clique em Verificar meu progresso para conferir se você executou a tarefa acima.
+
+Crie uma imagem com o Cloud Build
+Implante o serviço pdf-converter atualizado.
+OBSERVAÇÃO: é recomendável que o LibreOffice use 2 GB de RAM. Veja a linha com a opção --memory.
+
+Execute estes comandos para criar e implantar o contêiner:
+
+gcloud run deploy pdf-converter \
+  --image gcr.io/$GOOGLE_CLOUD_PROJECT/pdf-converter \
+  --platform managed \
+  --region us-east1 \
+  --memory=2Gi \
+  --no-allow-unauthenticated \
+  --set-env-vars PDF_BUCKET=$GOOGLE_CLOUD_PROJECT-processed \
+  --max-instances=3
+Clique em Verificar meu progresso para conferir se você executou a tarefa acima.
+
+Serviço de conversão em PDF implantado
+O serviço do Cloud Run foi implantado corretamente. No entanto, o aplicativo implantado requer permissões corretas para ser acessado.
+
+Crie uma conta de serviço
+A conta de serviço é um tipo especial de conta com acesso às APIs do Google.
+
+Neste laboratório, você usará uma conta de serviço para acessar o Cloud Run quando um evento do Cloud Storage for processado. O Cloud Storage oferece um conjunto avançado de notificações que podem ser usadas para acionar eventos.
+
+Em seguida, atualize o código para notificar o aplicativo quando for feito o upload de um arquivo.
+
+Clique no Menu de navegação > Armazenamento e verifique se dois buckets foram criados. Você verá:
+
+PROJECT_ID-processed
+
+PROJECT_ID-upload
+
+Crie uma notificação do Pub/Sub para indicar que um novo arquivo foi enviado ao bucket de documentos ("uploaded"). As notificações serão marcadas com o tópico "new-doc".
+
+gsutil notification create -t new-doc -f json -e OBJECT_FINALIZE gs://$GOOGLE_CLOUD_PROJECT-upload
+Crie uma conta de serviço para acionar os serviços do Cloud Run:
+
+gcloud iam service-accounts create pubsub-cloud-run-invoker --display-name "PubSub Cloud Run Invoker"
+Conceda permissão à conta de serviço para invocar o serviço de conversão em PDF:
+
+gcloud run services add-iam-policy-binding pdf-converter \
+  --member=serviceAccount:pubsub-cloud-run-invoker@$GOOGLE_CLOUD_PROJECT.iam.gserviceaccount.com \
+  --role=roles/run.invoker \
+  --region us-east1 \
+  --platform managed
+Execute este comando para encontrar o número do seu projeto:
+
+PROJECT_NUMBER=$(gcloud projects list \
+ --format="value(PROJECT_NUMBER)" \
+ --filter="$GOOGLE_CLOUD_PROJECT")
+Permita que seu projeto crie tokens de autenticação do Cloud Pub/Sub:
+
+gcloud projects add-iam-policy-binding $GOOGLE_CLOUD_PROJECT \
+  --member=serviceAccount:service-$PROJECT_NUMBER@gcp-sa-pubsub.iam.gserviceaccount.com \
+  --role=roles/iam.serviceAccountTokenCreator
+Clique em Verificar meu progresso para conferir se você executou a tarefa acima.
+
+A conta de serviço foi criada
+A conta de serviço criada pode ser usada para invocar o serviço do Cloud Run.
+
+Teste o serviço do Cloud Run
+Antes de continuar, teste o serviço implantado. Lembre-se de que o serviço requer autenticação. O teste confirmará se apenas pessoas autorizadas podem acessá-lo.
+
+Salve o URL do serviço na variável de ambiente $SERVICE_URL:
+
+SERVICE_URL=$(gcloud run services describe pdf-converter \
+  --platform managed \
+  --region us-east1 \
+  --format "value(status.url)")
+Exiba o SERVICE URL:
+echo $SERVICE_URL
+Envie uma solicitação GET anônima ao novo serviço:
+
+curl -X GET $SERVICE_URL
+A solicitação GET anônima será respondida com uma mensagem de erro: "Your client does not have permission to get URL". Isso está correto, já que usuários anônimos não têm permissão para chamar o serviço.
+
+Agora tente chamar o serviço como um usuário autorizado:
+
+curl -X GET -H "Authorization: Bearer $(gcloud auth print-identity-token)" $SERVICE_URL
+A resposta será: "Ready to process POST requests from Cloud Storage trigger"
+Parabéns! Você implantou um serviço autenticado do Cloud Run.
+
+Gatilho do Cloud Storage
+Para ativar uma notificação quando um conteúdo novo for enviado ao Cloud Storage, adicione uma assinatura ao tópico do Pub/Sub atual.
+
+Lembrete: as notificações do Cloud Storage enviarão automaticamente uma mensagem para sua fila de tópicos quando um conteúdo novo for enviado. O uso de notificações permite criar aplicativos que respondem a eventos sem precisar escrever mais código.
+
+Crie uma assinatura do Pub/Sub para executar o conversor em PDF sempre que uma mensagem for publicada no tópico new-doc:
+
+gcloud pubsub subscriptions create pdf-conv-sub \
+  --topic new-doc \
+  --push-endpoint=$SERVICE_URL \
+  --push-auth-service-account=pubsub-cloud-run-invoker@$GOOGLE_CLOUD_PROJECT.iam.gserviceaccount.com
+Clique em Verificar meu progresso para conferir se você executou a tarefa acima.
+
+Confirme a assinatura do Pub/Sub
+Agora sempre que é feito o upload de um arquivo, a assinatura do serviço do Pub/Sub interage com sua conta. A conta de serviço iniciará o serviço de conversão em PDF do Cloud Run.
+
+Teste a notificação do Cloud Storage
+Para testar o serviço do Cloud Run, use os arquivos de exemplo disponíveis.
+
+Copie os arquivos de teste no bucket de upload:
+
+gsutil -m cp -r gs://spls/gsp762/* gs://$GOOGLE_CLOUD_PROJECT-upload
+No Console do Cloud, observe o bucket de upload do Cloud Storage e clique no botão Atualizar bucket algumas vezes para confirmar que os arquivos são excluídos, um por um, à medida que são convertidos em PDF. Em seguida, clique em Armazenamento e depois no bucket com o nome que termina em "-processed". Ele contém as versões em PDF de todos os arquivos. Abra os arquivos PDF para verificar se eles foram convertidos corretamente.
+
+Quando o upload for concluído, use o Menu de navegação para acessar o Cloud Run e clique no serviço pdf-converter.
+
+dd2adc8511b64475.png
+
+Selecione a guia Registros e adicione um filtro para "Converting" e veja os arquivos convertidos.
+9484b44f6f2a27d7.png
+
+No Menu de navegação, acesse Armazenamento, abra a pasta "upload" e confirme se todos os arquivos foram processados.
+Excelente trabalho! Você criou um serviço para converter os arquivos enviados ao Cloud Storage em PDF.
+

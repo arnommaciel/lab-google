@@ -1,0 +1,625 @@
+https://www.cloudskillsboost.google/catalog_lab/2164?locale=pt_BR
+
+Arquitetura
+Na Pet Theory, os exames médicos são realizados por um laboratório externo. Depois de concluir o exame, o laboratório envia os resultados de volta para a Pet Theory.
+
+Para enviar os resultados, o laboratório usa um POST de HTTP(s) para o endpoint da Web da Pet Theory. A ilustração abaixo descreve a arquitetura geral.
+
+650_arch.png
+https://cdn.qwiklabs.com/6J7PDgV%2FpYo00ESDhV5JBl2G%2FvpEZ0LYsOre9WF9zfk%3D
+
+Depois de analisar o processo geral, Raquel acredita que seja possível projetar um sistema em que a Pet Theory possa:
+
+receber a solicitação do POST de HTTP e enviar ao laboratório uma confirmação de recebimento;
+enviar um e-mail ao cliente com o resultado;
+enviar uma mensagem de texto (SMS) e um e-mail ao cliente com o resultado.
+O projeto de Raquel isola cada uma das atividades acima e exige:
+
+um serviço para enviar as solicitações e as respostas relacionadas aos resultados;
+um serviço para enviar por e-mail os resultados dos exames para o cliente;
+um serviço para enviar uma mensagem de texto (SMS) ao cliente;
+o uso do Pub/Sub na comunicação entre serviços;
+o uso de uma infraestrutura sem servidor na arquitetura do aplicativo.
+Para desenvolver um código mais fácil de escrever e com menos bugs, Raquel lança mão de funções de uso único.
+
+imagem
+
+Raquel, consultora de software
+
+Oi, Pedro.
+
+Lilian quer que eu crie um protótipo para ajudar no processamento dos prontuários.
+
+Para começar, será que você pode configurar um tópico do Pub/Sub chamado new-lab-report?
+
+Raquel
+
+imagem
+
+Pedro, administrador de TI
+
+Olá, Raquel.
+
+Parece ser um projeto muito interessante. Consigo fazer isso para você ainda esta manhã. A configuração das duas atividades no GCP é muito rápida.
+
+Pedro
+
+Crie um tópico do Pub/Sub
+Ajude Pedro a criar um tópico do Pub/Sub chamado new-lab-report.
+
+650-system-arch.png
+https://cdn.qwiklabs.com/%2BsXFeTs902rTTPxNT%2BRV39seRaOvufAewh1VJpc%2B7Oc%3D
+
+Quando um serviço publica uma mensagem do Pub/Sub, ela deve ser marcada com um tópico. O serviço que será criado publica uma mensagem para cada resultado de exame encontrado.
+
+Primeiramente, você precisa criar um tópico para essa tarefa.
+
+Execute o seguinte comando para criar um tópico do Pub/Sub:
+
+gcloud pubsub topics create new-lab-report
+Qualquer serviço inscrito no tópico "new-lab-report" conseguirá processar a mensagem publicada pelo serviço de resultado. No diagrama acima, você verá dois desses processadores, o serviço de e-mail e o serviço de SMS.
+
+Em seguida, ative o Cloud Run, que executará seu código na nuvem:
+
+gcloud services enable run.googleapis.com
+Clique em Verificar meu progresso para conferir o objetivo.
+
+Crie um tópico do Pub/Sub
+Não se esqueça de dizer a Raquel que o tópico do Pub/Sub está pronto para ela usar.
+
+imagem
+
+Pedro, administrador de TI
+
+Olá, Raquel.
+
+Tudo pronto.
+
+Se você tiver tempo, eu gostaria de ver como este protótipo é preparado. Podemos trabalhar nisso juntos?
+
+Pedro
+
+imagem
+
+Raquel, consultora de software
+
+Oi, Pedro.
+
+Ótimo. Obrigada por fazer isso tão rápido. Vou marcar um horário e começaremos a trabalhar nisso.
+
+Raquel
+
+Criar o serviço de resultado do laboratório
+Ajude Raquel a configurar um novo serviço de resultados.
+
+9cd5510d5a234950a1b7c6cb1c00e327.png
+https://cdn.qwiklabs.com/iK4%2FDyuKKIVfMd6L1I8uZ%2BtwNHVrhsUZDjoSSfD5wZ4%3D
+
+Este serviço será usado para prototipagem; dessa forma, ele fará somente duas coisas:
+
+Receber o POST de HTTPS do serviço contendo os dados do resultado.
+
+Publicar uma mensagem no Pub/Sub.
+
+Adicionar código para o Lab Report Service
+No Cloud Shell, clone o repositório necessário para este laboratório:
+
+git clone https://github.com/rosera/pet-theory.git
+Acesse o diretório lab-service:
+
+cd pet-theory/lab05/lab-service
+Instale os pacotes a seguir, que serão necessários para receber as solicitações de HTTPS de entrada e publicar no Pub/Sub:
+
+npm install express
+npm install body-parser
+npm install @google-cloud/pubsub
+Esses comandos atualizam o package.json do arquivo para indicar as dependências necessárias para o serviço.
+
+Agora você editará o arquivo package.json de modo que o Cloud Run saiba como iniciar seu código.
+
+Abra o arquivo package.json.
+
+Na seção "scripts", adicione a linha "start": "node index.js" mostrada abaixo e salve o arquivo.
+
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+Crie um arquivo com o nome index.js e adicione este código a ele:
+
+const {PubSub} = require('@google-cloud/pubsub');
+const pubsub = new PubSub();
+const express = require('express');
+const app = express();
+const bodyParser = require('body-parser');
+app.use(bodyParser.json());
+const port = process.env.PORT || 8080;
+app.listen(port, () => {
+  console.log('Listening on port', port);
+});
+app.post('/', async (req, res) => {
+  try {
+    const labReport = req.body;
+    await publishPubSubMessage(labReport);
+    res.status(204).send();
+  }
+  catch (ex) {
+    console.log(ex);
+    res.status(500).send(ex);
+  }
+})
+async function publishPubSubMessage(labReport) {
+  const buffer = Buffer.from(JSON.stringify(labReport));
+  await pubsub.topic('new-lab-report').publish(buffer);
+}
+A parte mais importante do código está nesta seção:
+
+    const labReport = req.body;
+    await publishPubSubMessage(labReport);
+Essas duas linhas fazem o principal trabalho do serviço:
+
+Extrair o resultado do laboratório da solicitação de POST.
+Publicar uma mensagem do Pub/Sub contendo o resultado recém-publicado.
+Agora crie um arquivo com o nome Dockerfile e adicione o código abaixo a ele:
+
+FROM node:10
+WORKDIR /usr/src/app
+COPY package.json package*.json ./
+RUN npm install --only=production
+COPY . .
+CMD [ "npm", "start" ]
+Esse arquivo define como criar um pacote do serviço Cloud Run em um contêiner.
+
+Implante o lab-report-service
+Crie um script com o nome deploy.sh e cole estes comandos nele:
+
+gcloud builds submit \
+  --tag gcr.io/$GOOGLE_CLOUD_PROJECT/lab-report-service
+gcloud run deploy lab-report-service \
+  --image gcr.io/$GOOGLE_CLOUD_PROJECT/lab-report-service \
+  --platform managed \
+  --region us-east1 \
+  --allow-unauthenticated \
+  --max-instances=1
+Execute o seguinte comando para tornar o arquivo executável:
+
+chmod u+x deploy.sh
+Chegou a hora de implantar o serviço de resultados do laboratório. Execute o script de implantação:
+
+./deploy.sh
+Devido a problemas de sincronização, talvez apareça uma mensagem de erro na primeira vez que você executar este comando. Se acontecer isso, basta executar novamente deploy.sh.
+
+Depois que a implantação for concluída, você verá uma mensagem semelhante a esta:
+
+Service [lab-report-service] revision [lab-report-service-00001] has been deployed and is serving traffic at https://lab-report-service-[hash].a.run.app
+Bom trabalho. O serviço de resultados do laboratório foi implantado e processará os resultados por HTTP. Agora você pode testar se o novo serviço está instalado e funcionando.
+
+Clique em Verificar meu progresso para conferir o objetivo.
+
+Implante o serviço de resultados do laboratório: criar
+Clique em Verificar meu progresso para conferir o objetivo.
+
+Implante o serviço de resultados do laboratório: criar revisão
+Teste o serviço de resultados do laboratório
+Para validar o serviço de resultados, simule três POSTs de HTTPS criados pelo laboratório, cada um contendo um resultado. Para fins de teste, os resultados criados conterão somente um ID.
+
+Primeiramente, para facilitar o trabalho, coloque o URL do resultado em uma variável de ambiente.
+
+export LAB_REPORT_SERVICE_URL=$(gcloud run services describe lab-report-service --platform managed --region us-east1 --format="value(status.address.url)")
+Confirme que LAB_REPORT_SERVICE_URL foi capturada:
+
+echo $LAB_REPORT_SERVICE_URL
+Crie um novo arquivo com o nome post-reports.sh e adicione o código abaixo a ele:
+
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d "{\"id\": 12}" \
+  $LAB_REPORT_SERVICE_URL &
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d "{\"id\": 34}" \
+  $LAB_REPORT_SERVICE_URL &
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d "{\"id\": 56}" \
+  $LAB_REPORT_SERVICE_URL &
+O script acima usará o comando curl para postar três IDs distintos para o URL do serviço do laboratório. Cada comando será executado individualmente em segundo plano.
+
+Torne o script post-reports.sh executável:
+
+chmod u+x post-reports.sh
+Para testar o endpoint do serviço, você deve postar nele três resultados usando o script descrito acima:
+
+./post-reports.sh
+Esse script postou três resultados no serviço. Verifique os registros para ver os resultados.
+
+No Menu de navegação, clique em Cloud Run.
+
+650_cloudrun.png
+https://cdn.qwiklabs.com/NSinKH9JjW0FdLfToNxlngD7%2FfyRUaQi84f7JNQ2wkU%3D
+
+Agora você verá o lab-report-service recém implantado. Clique nele.
+
+650_lab-report.png
+https://cdn.qwiklabs.com/VETSy9pO9hIOc1laeSYpBDN09YSqE9a4nPkJF0mVHTQ%3D
+
+A página seguinte mostra os detalhes do lab-report-service. Clique na guia Registros.
+
+650_logs.png
+https://cdn.qwiklabs.com/p9hj%2BHaJRxagvfZ%2F17GuYJFhmevqttxJGTCN5nEkupU%3D
+
+Na página Registros, estão os resultados dos três resultados de teste que você acabou de postar com o script. Esperamos que os códigos de retorno do HTTP sejam 204, o que significa OK - sem conteúdo, mostrado abaixo. Se você não vir nenhuma entrada, tente rolar para cima e para baixo usando a barra de rolagem à direita. Essa ação faz com que o registro seja recarregado.
+
+650_logs-show.png
+https://cdn.qwiklabs.com/rzDeohBbvZPQuSrPlgGM%2FSepZhEoMgAkF54YSWcOWOs%3D
+
+A próxima tarefa é escrever os serviços de SMS e de e- mail. Esses serviços serão acionados quando o serviço de resultados publicar uma mensagem do Pub/Sub no tópico "new-lab-report".
+
+O serviço de e-mail
+Ajude Raquel a configurar o novo serviço de e-mail.
+
+650_email-svs.png
+https://cdn.qwiklabs.com/orzDpUvALUCJSunp36E31dAwKyUFOub526r%2FLbjgOco%3D
+
+Adicione o código do serviço de e-mail
+Acesse o diretório do serviço de e-mail:
+
+cd ~/pet-theory/lab05/email-service
+Instale estes pacotes para que o código processe as solicitações de HTTPS de entrada.
+
+npm install express
+npm install body-parser
+O comando acima atualizará o arquivo package.json, que descreve o app e as dependências dele. Adicione a instrução start para que o Cloud Run saiba como executar o código.
+
+Abra o arquivo package.json.
+
+Na seção "scripts", adicione a linha "start": "node index.js" mostrada abaixo e salve o arquivo.
+
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+Crie um arquivo chamado index.js e adicione o seguinte a ele:
+
+const express = require('express');
+const app = express();
+const bodyParser = require('body-parser');
+app.use(bodyParser.json());
+const port = process.env.PORT || 8080;
+app.listen(port, () => {
+  console.log('Listening on port', port);
+});
+app.post('/', async (req, res) => {
+  const labReport = decodeBase64Json(req.body.message.data);
+  try {
+    console.log(`Email Service: Report ${labReport.id} trying...`);
+    sendEmail();
+    console.log(`Email Service: Report ${labReport.id} success :-)`);
+    res.status(204).send();
+  }
+  catch (ex) {
+    console.log(`Email Service: Report ${labReport.id} failure: ${ex}`);
+    res.status(500).send();
+  }
+})
+function decodeBase64Json(data) {
+  return JSON.parse(Buffer.from(data, 'base64').toString());
+}
+function sendEmail() {
+  console.log('Sending email');
+}
+Esse código será executado quando o Pub/Sub postar uma mensagem no serviço. Veja o que ele faz:
+
+Ele decodifica a mensagem do Pub/Sub e tenta chamar a função sendEmail().
+Se isso funcionar e nenhuma exceção for gerada, ele retornará o código de status 204 para que o Pub/Sub saiba que a mensagem foi processada.
+Se houver uma exceção, o serviço retornará o código de status 500 para que o Pub/Sub saiba que a mensagem não foi processada e que, posteriormente, ela será postada novamente para o serviço.
+Quando a comunicação entre os serviços estiver funcionando, Raquel adicionará o código à função sendEmail() para enviar o e-mail.
+
+Agora crie um arquivo com o nome Dockerfile e adicione o código abaixo a ele:
+
+FROM node:10
+WORKDIR /usr/src/app
+COPY package.json package*.json ./
+RUN npm install --only=production
+COPY . .
+CMD [ "npm", "start" ]
+Esse arquivo define como criar um pacote do serviço Cloud Run em um contêiner.
+
+Implante o serviço de e-mail
+Crie um arquivo chamado deploy.sh e adicione o seguinte a ele:
+
+gcloud builds submit \
+  --tag gcr.io/$GOOGLE_CLOUD_PROJECT/email-service
+gcloud run deploy email-service \
+  --image gcr.io/$GOOGLE_CLOUD_PROJECT/email-service \
+  --platform managed \
+  --region us-central1 \
+  --no-allow-unauthenticated \
+  --max-instances=1
+Torne deploy.sh executável:
+
+chmod u+x deploy.sh
+Implante o serviço de e-mail
+
+./deploy.sh
+Quando a implantação estiver concluída, você verá uma mensagem parecida com esta:
+
+Service [email-service] revision [email-service-00001] has been deployed and is serving traffic at https://email-service-[hash].a.run.app
+O serviço foi implantado. Agora você precisa garantir que o serviço de e-mail seja acionado quando houver uma mensagem do Pub/Sub disponível.
+
+Clique em Verificar meu progresso para conferir o objetivo.
+
+Implante o serviço de e-mail: criar
+Clique em Verificar meu progresso para conferir o objetivo.
+
+Implante o serviço de e-mail: criar revisão
+Configure o Pub/Sub para acionar o serviço de e-mail
+Sempre que uma nova mensagem do Pub/Sub for publicada com o tópico "new-lab-report", ela deve acionar o serviço de e-mail. Para realizar essa tarefa, configure uma conta de serviço para tratar automaticamente das solicitações associadas ao serviço.
+
+650_email-trigger.png
+https://cdn.qwiklabs.com/%2B8Zqu9LqE36YJc72Wu6ySfAuY9DiZ8pZE%2BnQPI80%2FFw%3D
+
+Crie uma nova conta de serviço que será usada para acionar os serviços que respondem a mensagens do Pub/Sub:
+
+gcloud iam service-accounts create pubsub-cloud-run-invoker --display-name "PubSub Cloud Run Invoker"
+Clique em Verificar meu progresso para conferir o objetivo.
+
+Crie uma conta de serviço
+Dê à nova conta de serviço permissão para invocar o serviço de e-mail:
+
+gcloud run services add-iam-policy-binding email-service --member=serviceAccount:pubsub-cloud-run-invoker@$GOOGLE_CLOUD_PROJECT.iam.gserviceaccount.com --role=roles/run.invoker --region us-central1 --platform managed
+A seguir, faça com que o Pub/Sub invoque o serviço de SMS quando for publicada uma mensagem do "new-lab-report".
+
+Coloque o número do projeto em uma variável de ambiente para facilitar o acesso:
+
+PROJECT_NUMBER=$(gcloud projects list --filter="qwiklabs-gcp" --format='value(PROJECT_NUMBER)')
+A seguir, ative o projeto para criar tokens de autenticação do Pub/Sub.
+
+Execute o código abaixo:
+
+gcloud projects add-iam-policy-binding $GOOGLE_CLOUD_PROJECT --member=serviceAccount:service-$PROJECT_NUMBER@gcp-sa-pubsub.iam.gserviceaccount.com --role=roles/iam.serviceAccountTokenCreator
+Coloque o URL do serviço de e-mail em outra variável de ambiente:
+
+EMAIL_SERVICE_URL=$(gcloud run services describe email-service --platform managed --region us-east1 --format="value(status.address.url)")
+Confirme que EMAIL_SERVICE_URL foi capturada:
+
+echo $EMAIL_SERVICE_URL
+Crie uma inscrição do Pub/Sub para o serviço de e-mail.
+
+gcloud pubsub subscriptions create email-service-sub --topic new-lab-report --push-endpoint=$EMAIL_SERVICE_URL --push-auth-service-account=pubsub-cloud-run-invoker@$GOOGLE_CLOUD_PROJECT.iam.gserviceaccount.com
+Bom trabalho. O serviço agora está configurado para responder a mensagens do Cloud Pub/Sub. A etapa seguinte é validar o código para confirmar que ele atende aos requisitos.
+
+Clique em Verificar meu progresso para conferir o objetivo.
+
+Crie a inscrição do Pub/Sub
+Teste o serviço de resultados do laboratório e o serviço de e-mail juntos
+Usando o script criado anteriormente, poste os resultados do laboratório novamente:
+
+~/pet-theory/lab05/lab-service/post-reports.sh
+Em seguida, abra o registro (Menu de navegação > Cloud Run). Você verá os dois serviços do Cloud Run na sua conta.
+
+650-email-logs.png
+https://cdn.qwiklabs.com/zT96rwIMhLyQzRqtng65ZGo1cMY126ZUkcykQAKi0Q0%3D
+
+Clique em email-service e depois clique em Registros. Você verá o resultado do serviço ser acionado pelo Pub/Sub. Se você não vir as mensagens que espera, role para cima e para baixo com a barra de rolagem para atualizar o registro.
+
+650_log-fails-ok.png
+https://cdn.qwiklabs.com/koSPMZfQnQNhmB4Xy2PxEFPsdgBF%2FT0tEWtMz6AuApc%3D
+
+Bom trabalho! Agora o serviço de e-mail é capaz de gravar as informações no registro sempre que uma mensagem é processada na fila do tópico do Cloud Pub/Sub. A última tarefa é criar o serviço de SMS.
+
+O serviço de SMS
+Ajude Raquel a configurar o novo serviço de SMS.
+
+650_sms_arch.png
+https://cdn.qwiklabs.com/Q2zCpYNvV%2FAyDZ6Cz35F4D9Rtdx2OycYXFD8E3O%2FCwI%3D
+
+Adicione o código do serviço de SMS
+Crie um diretório para o serviço de SMS:
+
+cd ~/pet-theory/lab05/sms-service
+Instale os pacotes necessários para receber as solicitações de HTTPS de entrada:
+
+npm install express
+npm install body-parser
+Abra o arquivo package.json.
+
+Na seção "scripts", adicione a linha "start": "node index.js" mostrada abaixo e salve o arquivo.
+
+...
+"scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+...
+Crie um arquivo chamado index.js e adicione o seguinte a ele:
+
+const express = require('express');
+const app = express();
+const bodyParser = require('body-parser');
+app.use(bodyParser.json());
+const port = process.env.PORT || 8080;
+app.listen(port, () => {
+  console.log('Listening on port', port);
+});
+app.post('/', async (req, res) => {
+  const labReport = decodeBase64Json(req.body.message.data);
+  try {
+    console.log(`SMS Service: Report ${labReport.id} trying...`);
+    sendSms();
+    console.log(`SMS Service: Report ${labReport.id} success :-)`);
+    res.status(204).send();
+  }
+  catch (ex) {
+    console.log(`SMS Service: Report ${labReport.id} failure: ${ex}`);
+    res.status(500).send();
+  }
+})
+function decodeBase64Json(data) {
+  return JSON.parse(Buffer.from(data, 'base64').toString());
+}
+function sendSms() {
+  console.log('Sending SMS');
+}
+Agora crie um arquivo com o nome Dockerfile e adicione o código abaixo a ele:
+
+FROM node:10
+WORKDIR /usr/src/app
+COPY package.json package*.json ./
+RUN npm install --only=production
+COPY . .
+CMD [ "npm", "start" ]
+Esse arquivo define como criar um pacote do serviço Cloud Run em um contêiner. Agora que o código foi criado, o próximo passo é implantar o serviço.
+
+Implante o serviço de SMS
+Crie um arquivo com o nome deploy.sh e adicione este código a ele:
+
+gcloud builds submit \
+  --tag gcr.io/$GOOGLE_CLOUD_PROJECT/sms-service
+gcloud run deploy sms-service \
+  --image gcr.io/$GOOGLE_CLOUD_PROJECT/sms-service \
+  --platform managed \
+  --region us-east1 \
+  --no-allow-unauthenticated \
+  --max-instances=1
+Torne deploy.sh executável:
+
+chmod u+x deploy.sh
+Implante o serviço de SMS:
+
+./deploy.sh
+Quando a implantação estiver concluída, uma mensagem semelhante a esta será exibida:
+
+Service [sms-service] revision [sms-service-00001] has been deployed and is serving traffic at https://sms-service-[hash].a.run.app
+O serviço SMS está implantado, mas não está vinculado ao serviço do Cloud Pub/Sub. Corrija isso na seção seguinte.
+
+Clique em Verificar meu progresso para conferir o objetivo.
+
+Implante o serviço de SMS
+Configure o Cloud Pub/Sub para acionar o serviço de SMS
+Como acontece no serviço de e-mail, é preciso configurar o link entre o Cloud Pub/Sub e o serviço de SMS para processar as mensagens.
+
+650_sms_trigger.png
+https://cdn.qwiklabs.com/tARzXPlypfXhPCMY9kwYDNyKewY6nZ33xxEa2VOindg%3D
+
+Configure as permissões para fazer com que o Pub/Sub acione o serviço de SMS:
+
+gcloud run services add-iam-policy-binding sms-service --member=serviceAccount:pubsub-cloud-run-invoker@$GOOGLE_CLOUD_PROJECT.iam.gserviceaccount.com --role=roles/run.invoker --region us-central1 --platform managed
+A seguir, faça com que o Pub/Sub invoque o serviço de SMS quando for publicada uma mensagem do “new-lab-report”.
+
+A primeira etapa é colocar o endereço do URL do serviço de SMS em uma variável de ambiente:
+
+SMS_SERVICE_URL=$(gcloud run services describe sms-service --platform managed --region us-east1 --format="value(status.address.url)")
+Confirme que SMS_SERVICE_URL foi capturada:
+
+echo $SMS_SERVICE_URL
+Em seguida, crie a inscrição do Pub/Sub:
+
+gcloud pubsub subscriptions create sms-service-sub --topic new-lab-report --push-endpoint=$SMS_SERVICE_URL --push-auth-service-account=pubsub-cloud-run-invoker@$GOOGLE_CLOUD_PROJECT.iam.gserviceaccount.com
+Execute novamente o script de teste para postar três resultados no serviço de resultados do laboratório:
+
+~/pet-theory/lab05/lab-service/post-reports.sh
+Em seguida, abra o registro (Menu de navegação > Cloud Run). Você verá os três serviços do Cloud Run na sua conta.
+
+650_sms_logs.png
+https://cdn.qwiklabs.com/sHQObyFkCBHuJZPb5ApuetHKyPdSwFYez9mOyybn2h0%3D
+
+Clique em sms-service, em seguida, clique em Registros. Você verá o resultado do serviço ser acionado pelo Pub/Sub.
+
+O sistema de protótipo foi criado e testado com sucesso. Entretanto, Pedro está receoso porque não houve teste de resiliência no processo de validação inicial.
+
+Testar a resiliência do sistema
+O que acontecerá se um dos serviços cair? Pedro já se deparou com isso antes, já que é uma situação comum.
+
+Ajude Raquel a preparar o sistema para lidar com essa situação. Ela quer testar o que acontece quando ocorre um erro em um serviço devido à implantação de uma versão incorreta do serviço de e-mail.
+
+Volte para o diretório email-service:
+
+cd ~/pet-theory/lab05/email-service
+Adicione um texto inválido ao aplicativo de serviço de e-mail para provocar um erro.
+
+Edite index.js e adicione a linha throw à função sendEmail(), como mostrado abaixo. Isso vai gerar uma exceção, como se o servidor de e-mail estivesse inativo:
+
+...
+function sendEmail() {
+  throw 'Email server is down';
+  console.log('Sending email');
+}
+...
+A adição desse código provocará um erro no serviço quando ele for invocado.
+
+Implante esta versão incorreta do serviço de e-mail:
+
+./deploy.sh
+Quando a implantação do serviço de e-mail for concluída, poste novamente os dados dos resultados do laboratório e verifique atentamente o status do registro de email-service:
+
+~/pet-theory/lab05/lab-service/post-reports.sh
+Abra o registro do serviço de e-mail incorreto: Menu de navegação > Cloud Run. Quando você vir os três serviços do Cloud Run na sua conta, clique em email-service.
+
+O serviço de e-mail está sendo invocado, mas continuará dando erro. Se você rolar de volta nos registros, encontrará a causa-raiz: “Email server is down”. Você também verá que o serviço retorna o código de status 500 e que o Pub/Sub continua tentando chamar o serviço.
+
+650_throw.png
+https://cdn.qwiklabs.com/J%2FC8R51p4CEmYsshVYeZ3xZ8Oteb48A3EyFBE0zAQxA%3D
+
+Se você observar os registros do serviço de SMS, verá que ele está funcionando bem.
+
+Agora corrija o erro no serviço de e-mail e restaure o aplicativo.
+
+Abra o arquivo index.js, remova a linha throw inserida anteriormente e salve o arquivo.
+
+A função sendEmail de index.js agora se parece com o seguinte:
+
+function sendEmail() {
+  console.log('Sending email');
+}
+Implante a versão corrigida do serviço de e-mail:
+
+./deploy.sh
+Depois de terminada a implantação, clique no ícone atualizar no canto superior direito.
+
+Você verá que, quando os e-mails dos resultados 12, 34 e 56 foram finalmente enviados, o serviço de e-mail retornou o código de status 204, e o Pub/Sub parou de invocar o serviço. Não houve perda de dados; o Pub/Sub continuou tentando até que finalmente conseguiu. Essas são as bases de um sistema robusto.
+
+650-another.png
+https://cdn.qwiklabs.com/jQPSAg2lGIkkBDwKHgp7NG1iWJwn3ZKorUE7Gxi7lt8%3D
+
+Principais pontos
+Se os serviços se comunicarem de maneira assíncrona pelo Pub/Sub em vez de chamarem uns aos outros diretamente, o sistema poderá ser mais resiliente.
+
+Graças ao uso do Pub/Sub, o acionamento do serviço de resultados do laboratório é independente de outros serviços. Por exemplo, se os clientes também quiserem receber os resultados do laboratório por algum outro serviço de mensagens, será possível adicioná-lo sem precisar atualizar o serviço de resultados.
+
+O Cloud Pub/Sub lidou com as tentativas sucessivas. Os serviços não precisaram fazer isso. Os serviços precisam apenas retornar o código de status: sucesso ou erro.
+
+Graças às sucessivas tentativas do Pub/Sub, se há a queda de um serviço, o sistema consegue "se corrigir" sozinho quando o serviço fica on-line novamente.
+
+Parabéns!
+Com sua ajuda, Raquel criou um sistema de protótipo resiliente. O serviço é capaz de enviar automaticamente a todos os clientes um e-mail e uma mensagem de SMS. No caso da inatividade temporária de algum serviço, o sistema implementará um mecanismo de tentativas sucessivas de modo a não haver perda de dados. Raquel recebe elogios bem merecidos.
+
+imagem
+
+Lilian, fundadora da Pet Theory
+
+Olá, Raquel.
+
+Muito obrigada por todo seu trabalho árduo e liderança.
+
+Em um curto espaço de tempo, nossos principais sistemas foram totalmente reformulados.
+
+Na sexta-feira, faremos uma pequena reunião para celebrar, e seria ótimo se você pudesse participar como nossa convidada de honra.
+
+Lilian
+
+imagemMelody, diretora administrativa
+
+Raquel,
+
+Recebi da Pet Theory elogios pelo seu trabalho. Você é muito importante para nossa equipe.
+
+Agora que você terminou essa tarefa, eu gostaria de conversar com você sobre uma função mais sênior em um novo projeto.
+
+Melody
+
+Diretora administrativa
+
+Computer Consulting Inc.
+
+https://cdn.qwiklabs.com/aPmmwDroLNVvu6x8IrxnfC9mHx6YZhzc8Rxj%2F2tnTXM%3D

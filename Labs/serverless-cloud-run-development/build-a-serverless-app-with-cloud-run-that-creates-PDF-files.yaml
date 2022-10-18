@@ -1,0 +1,295 @@
+Ative a API Cloud Run:
+# Abra o menu de navegação e selecione APIs e serviços > Biblioteca. Na barra de pesquisa, digite "Cloud Run" e selecione a API Cloud Run na lista de resultados.
+
+Clique em Ativar e pressione o botão "Voltar" do navegador duas vezes. Seu console será semelhante a este:
+- Cloud Run API - Enabled
+
+Implante um serviço simples do Cloud Run:
+# A Raquel desenvolveu um protótipo do Cloud Run para o Pedro implantar no Google Cloud. Agora você ajudará o Pedro a estabelecer o serviço de PDF do Cloud Run para a Pet Theory.
+Abra uma nova sessão do Cloud Shell e execute este comando para clonar o repositório da Pet Theory:
+- git clone https://github.com/rosera/pet-theory.git
+Altere o diretório de trabalho atual para lab03:
+- cd pet-theory/lab03
+
+Edite o package.json com o editor de código do Cloud Shell ou com seu editor de texto preferido. Na seção "scripts", adicione "start": "node index.js",, como mostrado abaixo:
+...
+"scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+...
+
+Agora execute estes comandos no Cloud Shell para instalar os pacotes que o script de conversão usará:
+- npm install express
+- npm install body-parser
+- npm install child_process
+- npm install @google-cloud/storage
+
+Abra o arquivo lab03/index.js e revise o código:
+- O aplicativo será implantado como um serviço do Cloud Run que aceita HTTP POSTs.
+- Se a solicitação POST for uma notificação do Pub/Sub sobre um arquivo enviado, o serviço gravará os detalhes do arquivo no registro.
+- Se não for, o serviço simplesmente retornará a string "OK".
+
+Revise o arquivo chamado lab03/Dockerfile:
+# O arquivo acima é chamado de manifesto e oferece um roteiro para o comando Docker criar uma imagem. Cada linha começa com um comando que informa ao Docker como processar estas informações:
+- A primeira lista indica que a imagem base precisa usar o nó v12 como modelo para a imagem a ser criada.
+- A última linha indica o comando a ser executado, que nesta instância é "npm start".
+
+Para criar e implantar a API REST, use o Google Cloud Build. Execute este comando para iniciar o processo de criação:
+- gcloud builds submit --tag gcr.io/$GOOGLE_CLOUD_PROJECT/pdf-converter
+# O comando cria um contêiner com seu código e coloca esse contêiner no Container Registry do projeto.
+# Volte ao Console do Cloud, abra o menu de navegação e selecione Container Registry > Imagens. Você verá o contêiner hospedado
+
+Retorne à guia do editor de código e, no Cloud Shell, execute este comando para implantar o aplicativo:
+- gcloud run deploy pdf-converter \
+  --image gcr.io/$GOOGLE_CLOUD_PROJECT/pdf-converter \
+  --platform managed \
+  --region us-central1 \
+  --no-allow-unauthenticated \
+  --max-instances=1
+
+Quando a implantação for concluída, você verá uma mensagem como esta:
+- Service [pdf-converter] revision [pdf-converter-00001] has been deployed and is serving 100 percent of traffic at https://pdf-converter-[hash].a.run.app
+
+Crie a variável de ambiente $SERVICE_URL do app para acessá-lo facilmente:
+- SERVICE_URL=$(gcloud beta run services describe pdf-converter --platform managed --region us-central1 --format="value(status.url)")
+- echo $SERVICE_URL
+
+Faça uma solicitação POST anônima para seu novo serviço:
+- curl -X POST $SERVICE_URL
+# Isso gera a mensagem de erro "Your client does not have permission to get the URL", o que é bom, já que o ideal é que usuários anônimos não consigam chamar o serviço.
+
+Agora tente chamar o serviço como um usuário autorizado:
+- curl -X POST -H "Authorization: Bearer $(gcloud auth print-identity-token)" $SERVICE_URL
+# Se receber a resposta "OK", isso significa que o serviço do Cloud Run foi implantado. Parabéns!
+
+============================================================
+Acione o serviço do Cloud Run quando um novo arquivo é enviado:
+
+# Agora que o serviço do Cloud Run foi implantado com sucesso, a Raquel gostaria que o Pedro criasse uma área de preparo para a conversão dos dados. O bucket do Cloud Storage usará um acionador de evento para notificar o aplicativo quando um arquivo for enviado e tiver que ser processado.
+
+Execute este comando para criar um bucket no Cloud Storage para os documentos enviados:
+- gsutil mb gs://$GOOGLE_CLOUD_PROJECT-upload
+
+E crie outro bucket para os PDFs processados:
+- gsutil mb gs://$GOOGLE_CLOUD_PROJECT-processed
+- Retorne à guia do Console do Cloud, abra o Menu de navegação e selecione Cloud Storage. Verifique se os buckets foram criados. Também haverá outros buckets que serão usados pela plataforma.
+
+
+No Cloud Shell, execute o comando a seguir para instruir o Cloud Storage a enviar uma notificação do Pub/Sub sempre que o upload de um novo arquivo for concluído no bucket de documentos:
+- gsutil notification create -t new-doc -f json -e OBJECT_FINALIZE gs://$GOOGLE_CLOUD_PROJECT-upload
+# As notificações serão rotuladas com o tópico "new-doc".
+
+Agora crie uma nova conta de serviço que o Pub/Sub usará para acionar os serviços do Cloud Run:
+- gcloud iam service-accounts create pubsub-cloud-run-invoker --display-name "PubSub Cloud Run Invoker"
+
+Conceda à nova conta de serviço permissão para invocar o serviço de conversão de PDF:
+- gcloud beta run services add-iam-policy-binding pdf-converter --member=serviceAccount:pubsub-cloud-run-invoker@$GOOGLE_CLOUD_PROJECT.iam.gserviceaccount.com --role=roles/run.invoker --platform managed --region us-central1
+
+Execute este comando para encontrar o número do seu projeto:
+- gcloud projects list
+# Procure o projeto cujo nome começa com "qwiklabs-gcp-". Você usará o valor do número do projeto no próximo comando.
+
+Crie uma variável de ambiente PROJECT_NUMBER, substituindo [project number] pelo Número do projeto do último comando:
+- PROJECT_NUMBER=[project number]
+
+Em seguida, ative seu projeto para criar tokens de autenticação do Cloud Pub/Sub:
+- gcloud projects add-iam-policy-binding $GOOGLE_CLOUD_PROJECT --member=serviceAccount:service-$PROJECT_NUMBER@gcp-sa-pubsub.iam.gserviceaccount.com --role=roles/iam.serviceAccountTokenCreator
+
+Por fim, crie uma assinatura do Pub/Sub para que o conversor de PDF possa ser executado sempre que uma mensagem for publicada no tópico "new-doc":
+- gcloud beta pubsub subscriptions create pdf-conv-sub --topic new-doc --push-endpoint=$SERVICE_URL --push-auth-service-account=pubsub-cloud-run-invoker@$GOOGLE_CLOUD_PROJECT.iam.gserviceaccount.com
+
+
+====================================================================================
+Verifique se o serviço do Cloud Run é acionado quando os arquivos são enviados ao Cloud Storage:
+
+# Para verificar se o aplicativo está funcionando conforme esperado, Raquel pede a Pedro para fazer upload de alguns dados de teste no bucket de armazenamento nomeado e verificar o Cloud Logging.
+Copie alguns arquivos de teste no bucket de upload:
+- gsutil -m cp gs://spls/gsp644/* gs://$GOOGLE_CLOUD_PROJECT-upload
+
+# Depois que o upload for concluído, retorne à guia do Console do Cloud, abra o menu de navegação e selecione Registros na seção Operations.
+# Na primeira lista suspensa, filtre os resultados para Revisão do Cloud Run e clique em Adicionar. Em seguida, clique em Executar Consulta.
+
+# Nos resultados da consulta, procure uma entrada de registro que comece com file: e clique nela.
+# Ele mostra um despojo dos dados do arquivo que o Pub/Sub envia ao serviço Cloud Run quando um novo arquivo é carregado.
+# Você consegue encontrar o nome do arquivo que enviou neste objeto?
+
+# Observação: se você não vir nenhuma entrada de registro que comece com "file", clique no botão "Carregar registros mais recentes" na parte inferior da página.
+
+Retorne à guia do editor de código e execute o comando a seguir no Cloud Shell para limpar o diretório upload, excluindo os arquivos ali presentes:
+- gsutil -m rm gs://$GOOGLE_CLOUD_PROJECT-upload/*
+
+
+====================================================================================
+Contêineres do Docker:
+
+# Pedro precisa converter um backlog de faturas no formato PDF para que todos os clientes possam abri-las. Ele envia um e-mail a Raquel pedindo ajuda...
+# Pedro envia a Raquel o fragmento de código que ele escreveu para gerar um PDF de um arquivo:
+
+const {promisify} = require('util');
+const exec        = promisify(require('child_process').exec);
+const cmd = 'libreoffice --headless --convert-to pdf --outdir ' +
+            `/tmp "/tmp/${fileName}"`;
+const { stdout, stderr } = await exec(cmd);
+if (stderr) {
+  throw stderr;
+}
+
+LibreOffice nos servidores do escritório:
+apt-get update -y && apt-get install -y libreoffice && apt-get clean
+
+
+
+Atualize o contêiner do Docker:
+# Com todos os arquivos identificados, agora é possível criar o Dockerfile. Ajude Raquel a configurar e implantar o contêiner.
+
+# O pacote do LibreOffice não foi incluído no contêiner antes, então é necessário adicioná-lo. Pedro já forneceu os comandos que ele usa para criar o aplicativo, e Raquel os adicionará como um comando RUN no Dockerfile.
+
+Abra o manifesto do Dockerfile e adicione a linha de comando RUN apt-get update -y && apt-get install -y libreoffice && apt-get clean conforme mostrado abaixo:
+
+FROM node:12
+RUN apt-get update -y \
+    && apt-get install -y libreoffice \
+    && apt-get clean
+WORKDIR /usr/src/app
+COPY package.json package*.json ./
+RUN npm install --only=production
+COPY . .
+CMD [ "npm", "start" ]
+
+Implante a nova versão do serviço pdf-conversion:
+Abra o arquivo index.js e adicione estes requisitos de pacote na parte superior do arquivo:
+
+const {promisify} = require('util');
+const {Storage}   = require('@google-cloud/storage');
+const exec        = promisify(require('child_process').exec);
+const storage     = new Storage();
+
+Substitua app.post('/', async (req, res) por este código:
+app.post('/', async (req, res) => {
+  try {
+    const file = decodeBase64Json(req.body.message.data);
+    await downloadFile(file.bucket, file.name);
+    const pdfFileName = await convertFile(file.name);
+    await uploadFile(process.env.PDF_BUCKET, pdfFileName);
+    await deleteFile(file.bucket, file.name);
+  }
+  catch (ex) {
+    console.log(`Error: ${ex}`);
+  }
+  res.set('Content-Type', 'text/plain');
+  res.send('\n\nOK\n\n');
+})
+
+Na parte inferior do arquivo, adicione este código que processa os documentos do LibreOffice:
+async function downloadFile(bucketName, fileName) {
+  const options = {destination: `/tmp/${fileName}`};
+  await storage.bucket(bucketName).file(fileName).download(options);
+}
+async function convertFile(fileName) {
+  const cmd = 'libreoffice --headless --convert-to pdf --outdir /tmp ' +
+              `"/tmp/${fileName}"`;
+  console.log(cmd);
+  const { stdout, stderr } = await exec(cmd);
+  if (stderr) {
+    throw stderr;
+  }
+  console.log(stdout);
+  pdfFileName = fileName.replace(/\.\w+$/, '.pdf');
+  return pdfFileName;
+}
+async function deleteFile(bucketName, fileName) {
+  await storage.bucket(bucketName).file(fileName).delete();
+}
+async function uploadFile(bucketName, fileName) {
+  await storage.bucket(bucketName).upload(`/tmp/${fileName}`);
+}
+
+Verifique se o arquivo index.js se parece com o seguinte:
+# Nota: Nota: Para evitar erros de formatação, é recomendável substituir todo o código em seu arquivo index.js por este código de exemplo.
+const {promisify} = require('util');
+const {Storage}   = require('@google-cloud/storage');
+const exec        = promisify(require('child_process').exec);
+const storage     = new Storage();
+const express     = require('express');
+const bodyParser  = require('body-parser');
+const app         = express();
+app.use(bodyParser.json());
+const port = process.env.PORT || 8080;
+app.listen(port, () => {
+  console.log('Listening on port', port);
+});
+app.post('/', async (req, res) => {
+  try {
+    const file = decodeBase64Json(req.body.message.data);
+    await downloadFile(file.bucket, file.name);
+    const pdfFileName = await convertFile(file.name);
+    await uploadFile(process.env.PDF_BUCKET, pdfFileName);
+    await deleteFile(file.bucket, file.name);
+  }
+  catch (ex) {
+    console.log(`Error: ${ex}`);
+  }
+  res.set('Content-Type', 'text/plain');
+  res.send('\n\nOK\n\n');
+})
+function decodeBase64Json(data) {
+  return JSON.parse(Buffer.from(data, 'base64').toString());
+}
+async function downloadFile(bucketName, fileName) {
+  const options = {destination: `/tmp/${fileName}`};
+  await storage.bucket(bucketName).file(fileName).download(options);
+}
+async function convertFile(fileName) {
+  const cmd = 'libreoffice --headless --convert-to pdf --outdir /tmp ' +
+              `"/tmp/${fileName}"`;
+  console.log(cmd);
+  const { stdout, stderr } = await exec(cmd);
+  if (stderr) {
+    throw stderr;
+  }
+  console.log(stdout);
+  pdfFileName = fileName.replace(/\.\w+$/, '.pdf');
+  return pdfFileName;
+}
+async function deleteFile(bucketName, fileName) {
+  await storage.bucket(bucketName).file(fileName).delete();
+}
+async function uploadFile(bucketName, fileName) {
+  await storage.bucket(bucketName).upload(`/tmp/${fileName}`);
+}
+
+A lógica principal está nestas funções:
+const file = decodeBase64Json(req.body.message.data);
+await downloadFile(file.bucket, file.name);
+const pdfFileName = await convertFile(file.name);
+await uploadFile(process.env.PDF_BUCKET, pdfFileName);
+await deleteFile(file.bucket, file.name);
+
+Execute este comando para criar o contêiner:
+- gcloud builds submit \
+  --tag gcr.io/$GOOGLE_CLOUD_PROJECT/pdf-converter
+
+
+Agora implante a versão mais recente do aplicativo:
+- gcloud run deploy pdf-converter \
+  --image gcr.io/$GOOGLE_CLOUD_PROJECT/pdf-converter \
+  --platform managed \
+  --region us-central1 \
+  --memory=2Gi \
+  --no-allow-unauthenticated \
+  --set-env-vars PDF_BUCKET=$GOOGLE_CLOUD_PROJECT-processed \
+  --max-instances=1
+
+
+Como testar o serviço pdf-conversion:
+Depois que a execução dos comandos de implantação for concluída, execute este comando para verificar se o serviço foi implantado corretamente:
+- curl -X POST -H "Authorization: Bearer $(gcloud auth print-identity-token)" $SERVICE_URL
+
+Se receber a resposta "OK", o serviço atualizado do Cloud Run foi implantado com sucesso. O LibreOffice converte vários tipos de arquivo em PDF: DOCX, XLSX, JPG, PNG, GIF etc.
+Execute este comando para fazer upload de alguns arquivos de exemplo:
+- gsutil -m cp gs://spls/gsp644/* gs://$GOOGLE_CLOUD_PROJECT-upload
+
+# Retorne ao Console do Cloud, abra o Menu de navegação e selecione Cloud Storage. Abra o bucket -upload e clique no botão Atualizar algumas vezes para ver como os arquivos são excluídos, um por um, à medida que são convertidos no formato PDF:
+# Em seguida, clique em Navegador no menu à esquerda e selecione o bucket cujo nome termina em "-processed". Ele contém as versões em PDF de todos os arquivos. Abra os arquivos PDF para garantir que eles foram convertidos corretamente:
+
