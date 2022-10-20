@@ -1,414 +1,358 @@
-Task 1. Download the source code
-To get set up, open a new session in Cloud Shell and run the following command to set your zone <filled in at lab start> :
+O que é o Kubernetes Engine?
+O Kubernetes Engine é a versão hospedada do Kubernetes do Google Cloud, um gerenciador de cluster e sistema de orquestração avançado para contêineres. O Kubernetes é um projeto de código aberto que pode ser usado em muitos ambientes diferentes, desde laptops a clusters de vários nós com alta disponibilidade e de máquinas virtuais a bare metal. Como mencionado acima, os apps do Kubernetes são desenvolvidos em contêineres. São aplicativos leves com todas as dependências e bibliotecas necessárias para executá-los. Essa estrutura subjacente torna os aplicativos Kubernetes altamente disponíveis, seguros e rápidos de implantar, o que é ideal para desenvolvedores de nuvem.
 
-gcloud config set compute/zone
+O que é o Jenkins?
+O Jenkins é um servidor de automação de código aberto que permite orquestrar com flexibilidade canais de versão, teste e implantação. Com o Jenkins, os desenvolvedores podem fazer iterações rápidas em projetos sem se preocupar com problemas de sobrecarga que podem ser gerados pela entrega contínua.
 
-Then copy the lab's sample code:
+O que é a entrega/implantação contínua?
+Quando é preciso configurar um canal de entrega contínua (CD, na sigla em inglês), a implantação do Jenkins no Kubernetes Engine oferece benefícios importantes em comparação com uma implantação padrão baseada em VM.
+
+Se você usar contêineres no processo de criação, um host virtual poderá executar jobs em vários sistemas operacionais. O Kubernetes Engine oferece ephemeral build executors (executores de compilação temporários), que são usados somente quando as versões estão ativamente em execução, deixando recursos para outras tarefas do cluster, como jobs de processamento em lote. Outra vantagem do uso de executores de compilação temporários é a velocidade, já que eles são iniciados em questão de segundos.
+
+Além disso, o Kubernetes Engine vem com o balanceador de carga do Google, que pode ser usado para automatizar o roteamento de tráfego da Web para suas instâncias. O balanceador de carga processa a terminação SSL e usa um endereço IP global configurado com a rede de backbone do Google. Com a interface da Web, esse balanceador de carga sempre levará seus usuários a uma instância do aplicativo pelo caminho mais rápido possível.
+
+Agora que você aprendeu um pouco sobre o Kubernetes, o Jenkins e como os dois interagem em um pipeline de CD, é hora de criar um.
+
+
+Baixe o código fonte
+Para fazer a configuração, abra uma nova sessão no Cloud Shell e execute o seguinte comando para definir sua zona us-east1-d:
+
+gcloud config set compute/zone us-east1-d
+Em seguida, clone o código de amostra do laboratório:
 
 gsutil cp gs://spls/gsp051/continuous-deployment-on-kubernetes.zip .
-
 unzip continuous-deployment-on-kubernetes.zip
-
-Now change to the correct directory:
+Agora, mude para o diretório correto:
 
 cd continuous-deployment-on-kubernetes
-
-Task 2. Provisioning Jenkins
-Creating a Kubernetes cluster
-Now, run the following command to provision a Kubernetes cluster:
+Como provisionar o Jenkins
+Como criar um cluster do Kubernetes
+Agora, execute o seguinte comando para provisionar um cluster do Kubernetes:
 
 gcloud container clusters create jenkins-cd \
 --num-nodes 2 \
 --machine-type n1-standard-2 \
 --scopes "https://www.googleapis.com/auth/source.read_write,cloud-platform"
+Essa etapa pode demorar vários minutos para ser concluída. Os escopos extras permitem que o Jenkins acesse o Cloud Source Repositories e o Google Container Registry.
 
-This step can take up to several minutes to complete. The extra scopes enable Jenkins to access Cloud Source Repositories and Google Container Registry.
+Teste a tarefa concluída
+Clique em Verificar meu progresso para analisar a tarefa realizada. Se o cluster do Kubernetes tiver sido criado corretamente, você verá uma pontuação de avaliação.
 
-Test completed task
-
-Click Check my progress to verify your performed task. If you have successfully created a Kubernetes cluster, you'll see an assessment score.
-
-Create a Kubernetes cluster (zone: <filled in at lab start> )
-Before continuing, confirm that your cluster is running by executing the following command:
+Criar um cluster do Kubernetes (zona: us-east1-d)
+Antes de continuar, execute o seguinte comando para confirmar se o cluster está ativo:
 
 gcloud container clusters list
-
-Now, get the credentials for your cluster:
+Consulte as credenciais do cluster:
 
 gcloud container clusters get-credentials jenkins-cd
-
-Kubernetes Engine uses these credentials to access your newly provisioned cluster—confirm that you can connect to it by running the following command:
+O Kubernetes Engine usa essas credenciais para acessar seu cluster recém-provisionado. Confirme se você consegue se conectar a ele executando o seguinte comando:
 
 kubectl cluster-info
+Configurar Helm
+Neste laboratório, você usará o Helm para instalar o Jenkins do repositório Charts. O Helm é um gerenciador de pacotes que facilita a configuração e a implantação de aplicativos do Kubernetes. Depois de instalar o Jenkins, você poderá configurar seu canal de CI/CD.
 
-Task 3. Setup Helm
-In this lab, you will use Helm to install Jenkins from the Charts repository. Helm is a package manager that makes it easy to configure and deploy Kubernetes applications. Once you have Jenkins installed, you'll be able to set up your CI/CD pipeline.
-
-Add Helm's stable chart repo:
+Adicione o repositório de gráfico estável do Helm:
 
 helm repo add jenkins https://charts.jenkins.io
-
-Ensure the repo is up to date:
+Certifique-se de que o repositório esteja atualizado:
 
 helm repo update
+Configure e instale o Jenkins
+Ao instalar o Jenkins, um arquivo de valores pode ser usado como um modelo para fornecer valores que são necessários para a configuração.
 
-Task 4. Configure and Install Jenkins
-When installing Jenkins, a values file can be used as a template to provide values that are necessary for setup.
+Você usará um arquivo de valores personalizados para configurar automaticamente seu Kubernetes Cloud e adicionar os seguintes plug-ins necessários:
 
-You will use a custom values file to automatically configure your Kubernetes Cloud and add the following necessary plugins:
-
-Kubernetes:latest
+Kubernetes:1.29.4
 Workflow-multibranch:latest
-Git:latest
-Configuration-as-code:latest
+Git:4.7.1
+Configuration-as-code:1.51
 Google-oauth-plugin:latest
 Google-source-plugin:latest
 Google-storage-plugin:latest
-This will allow Jenkins to connect to your cluster and your GCP project.
+Isso permitirá que o Jenkins se conecte ao cluster e ao projeto do GCP.
 
-Use the Helm CLI to deploy the chart with your configuration settings:
-
+Baixe o arquivo de valores personalizados:
+gsutil cp gs://spls/gsp330/values.yaml jenkins/values.yaml
+Use o Helm CLI para implantar o gráfico com suas definições de configuração.
 helm install cd jenkins/jenkins -f jenkins/values.yaml --wait
+Talvez leve alguns minutos para que o comando seja concluído.
 
-This command may take a couple minutes to complete.
+Teste a tarefa concluída
+Clique em Verificar meu progresso para analisar a tarefa realizada. Se o gráfico do Jenkins tiver sido configurado corretamente, você verá uma pontuação de avaliação.
 
-Test completed task
-
-Click Check my progress to verify your performed task. If you have successfully configure a Jenkins chart you will see an assessment score.
-
-Configure and Install Jenkins
-Once that command completes ensure the Jenkins pod goes to the Running state and the container is in the READY state:
+Configure e instale o Jenkins
+Após a execução do comando, verifique se o estado do pod do Jenkins está definido como "Running" e o do contêiner como "READY":
 
 kubectl get pods
-
-Example Output:
+Exemplo de resposta:
 
 NAME                          READY     STATUS    RESTARTS   AGE
 cd-jenkins-7c786475dd-vbhg4   1/1       Running   0          1m
-Configure the Jenkins service account to be able to deploy to the cluster:
+Configure a conta de serviço do Jenkins para poder fazer a implantação no cluster.
 
 kubectl create clusterrolebinding jenkins-deploy --clusterrole=cluster-admin --serviceaccount=default:cd-jenkins
-
-You should receive the following output:
+Você verá a seguinte resposta:
 
 clusterrolebinding.rbac.authorization.k8s.io/jenkins-deploy created
-Run the following command to setup port forwarding to the Jenkins UI from the Cloud Shell:
+Execute o seguinte comando para configurar o encaminhamento de portas da IU do Jenkins no Cloud Shell:
 
 export POD_NAME=$(kubectl get pods --namespace default -l "app.kubernetes.io/component=jenkins-master" -l "app.kubernetes.io/instance=cd" -o jsonpath="{.items[0].metadata.name}")
 kubectl port-forward $POD_NAME 8080:8080 >> /dev/null &
-
-Now, check that the Jenkins Service was created properly:
+Agora, verifique se o serviço do Jenkins foi criado corretamente:
 
 kubectl get svc
-
-Example Output:
+Exemplo de resposta:
 
 NAME               CLUSTER-IP     EXTERNAL-IP   PORT(S)     AGE
-cd-jenkins         10.35.249.67           8080/TCP    3h
-cd-jenkins-agent   10.35.248.1            50000/TCP   3h
-kubernetes         10.35.240.1            443/TCP     9h
-You are using the Kubernetes Plugin so that our builder nodes will be automatically launched as necessary when the Jenkins master requests them. Upon completion of their work, they will automatically be turned down and their resources added back to the clusters resource pool.
+cd-jenkins         10.35.249.67   <none>        8080/TCP    3h
+cd-jenkins-agent   10.35.248.1    <none>        50000/TCP   3h
+kubernetes         10.35.240.1    <none>        443/TCP     9h
+Você está usando o Plug-in do Kubernetes para que os nós do builder sejam iniciados automaticamente, conforme necessário, quando o mestre do Jenkins os solicitar. Após a conclusão do processo, eles serão automaticamente desativados, e os recursos relacionados serão adicionados outra vez ao pool de recursos de clusters.
 
-Notice that this service exposes ports 8080 and 50000 for any pods that match the selector. This will expose the Jenkins web UI and builder/agent registration ports within the Kubernetes cluster. Additionally, the jenkins-ui services is exposed using a ClusterIP so that it is not accessible from outside the cluster.
+Esse serviço expõe as portas 8080 e 50000 dos pods que correspondem ao seletor. Isso vai expor as portas da IU da Web do Jenkins e as portas de registro do agente/construtor no cluster do Kubernetes. Além disso, os serviços jenkins-ui são expostos usando um ClusterIP para que não possam ser acessados de fora do cluster.
 
-Task 5. Connect to Jenkins
-The Jenkins chart will automatically create an admin password for you. To retrieve it, run:
+Conecte-se ao Jenkins
+O gráfico do Jenkins criará automaticamente uma senha de administrador para você. Para vê-la, execute:
 
 printf $(kubectl get secret cd-jenkins -o jsonpath="{.data.jenkins-admin-password}" | base64 --decode);echo
+Para acessar a interface do usuário do Jenkins, clique no botão Visualização na Web no Cloud Shell e em Visualizar na porta 8080:
+web_prev.png
 
-To get to the Jenkins user interface, click on the Web Preview button in Cloud Shell, then click Preview on port 8080:
-Preview on port 8080 option
+Agora você poderá fazer login com o nome de usuário do admin e sua senha gerada automaticamente.
+A configuração do Jenkins no seu cluster do Kubernetes está pronta. O Jenkins gerenciará seus canais automatizados de CI/CD nas próximas seções.
 
-You should now be able to log in with username admin and your auto-generated password.
-You now have Jenkins set up in your Kubernetes cluster! Jenkins will drive your automated CI/CD pipelines in the next sections.
+Entenda o aplicativo
+Você implantará o aplicativo de amostra gceme no canal de implantação contínua. O aplicativo, escrito na linguagem Go, está no diretório sample-app do repositório. Quando você executa o binário gceme em uma instância do Compute Engine, o app exibe os metadados da instância em um card de informações.
 
-Task 6. Understanding the Application
-You'll deploy the sample application, gceme, in your continuous deployment pipeline. The application is written in the Go language and is located in the repo's sample-app directory. When you run the gceme binary on a Compute Engine instance, the app displays the instance's metadata in an info card.
+90fb779a65809b9e.png
 
-Backend that serviced this request page
+O aplicativo simula um microsserviço aceitando dois modos de operação.
 
-The application mimics a microservice by supporting two operation modes.
+No modo de back-end: o gceme detecta a atividade da porta 8080 e retorna metadados da instância do Compute Engine no formato JSON.
+No modo de front-end: o gceme consulta o serviço de back-end e renderiza o JSON resultante na interface do usuário.
+fc22b68ab20dfe0e.png
 
-In backend mode: gceme listens on port 8080 and returns Compute Engine instance metadata in JSON format.
-In frontend mode: gceme queries the backend gceme service and renders the resulting JSON in the user interface.
-gceme architecture diagram
+Como implantar o aplicativo
+Você implantará o aplicativo em dois ambientes diferentes:
 
-Task 7. Deploying the Application
-You will deploy the application into two different environments:
-
-Production: The live site that your users access.
-
-Canary: A smaller-capacity site that receives only a percentage of your user traffic. Use this environment to validate your software with live traffic before it's released to all of your users.
-
-In Google Cloud Shell, navigate to the sample application directory:
+Produção: é o site ativo que os usuários acessam.
+Canário: é um site de capacidade menor que só recebe uma porcentagem do tráfego do usuário. Use esse ambiente para validar seu software com o tráfego ativo antes de lançá-lo para todos os usuários.
+No Google Cloud Shell, navegue para o diretório de aplicativos de amostra:
 
 cd sample-app
-
-Create the Kubernetes namespace to logically isolate the deployment:
+Crie o namespace do Kubernetes para isolar logicamente a implantação:
 
 kubectl create ns production
-
-Create the production and canary deployments, and the services using the kubectl apply commands:
+Use os comandos kubectl apply para criar as implantações das versões de produção e canário, além dos serviços:
 
 kubectl apply -f k8s/production -n production
-
 kubectl apply -f k8s/canary -n production
-
 kubectl apply -f k8s/services -n production
+Teste a tarefa concluída
+Clique em Verificar meu progresso para analisar a tarefa realizada. Se as implantações tiverem sido criadas corretamente, você verá uma pontuação de avaliação.
 
-Test completed task
+Crie as implantações de produção e canário
+Por padrão, somente uma réplica do front-end é implantada. Use o comando kubectl scale para garantir o mínimo de quatro réplicas em execução o tempo todo.
 
-Click Check my progress to verify your performed task. If you have successfully created deployments you will see an assessment score.
-
-Create the production and canary deployments
-By default, only one replica of the frontend is deployed. Use the kubectl scale command to ensure that there are at least 4 replicas running at all times.
-
-Scale up the production environment frontends by running the following command:
+Escalone os front-ends do ambiente de produção executando o seguinte comando:
 
 kubectl scale deployment gceme-frontend-production -n production --replicas 4
-
-Now confirm that you have 5 pods running for the frontend, 4 for production traffic and 1 for canary releases (changes to the canary release will only affect 1 out of 5 (20%) of users):
+Agora, confirme que você tem cinco pods em execução para o front-end, quatro para o tráfego de produção e um para versões canário. As alterações na versão canário afetarão somente um a cada cinco usuários (20%):
 
 kubectl get pods -n production -l app=gceme -l role=frontend
-
-Also confirm that you have 2 pods for the backend, 1 for production and 1 for canary:
+Além disso, confirme que você tem dois pods para o back-end, um para a produção e um para a versão canário:
 
 kubectl get pods -n production -l app=gceme -l role=backend
-
-Retrieve the external IP for the production services:
+Consulte o IP externo dos serviços de produção:
 
 kubectl get service gceme-frontend -n production
+Observação: o endereço IP externo do balanceador de carga talvez leve alguns minutos para aparecer.
 
-Note: It can take several minutes before you see the load balancer external IP address.
-
-Example Output:
+Exemplo de resposta:
 
 NAME            TYPE          CLUSTER-IP     EXTERNAL-IP     PORT(S)  AGE
 gceme-frontend  LoadBalancer  10.79.241.131  104.196.110.46  80/TCP   5h
-Paste External IP into a browser to see the info card displayed on a card—you should get a similar page:
+Cole o IP externo no navegador para ver o card de informações exibido. Você deverá ver uma página semelhante a esta:
 
-Backend that serviced this request
+backend_card.png
 
-Now, store the frontend service load balancer IP in an environment variable for use later:
+Agora, armazene o IP do balanceador de carga do serviço de front-end em uma variável de ambiente para usar mais tarde:
 
 export FRONTEND_SERVICE_IP=$(kubectl get -o jsonpath="{.status.loadBalancer.ingress[0].ip}" --namespace=production services gceme-frontend)
-
-Confirm that both services are working by opening the frontend external IP address in your browser.
-
-Check the version output of the service by running the following command (it should read 1.0.0):
+Para confirmar que os dois serviços estão funcionando, abra o endereço IP externo do front-end no navegador. Verifique a resposta da versão do serviço (que deve ser 1.0.0) executando o seguinte comando:
 
 curl http://$FRONTEND_SERVICE_IP/version
+Pronto. Você implantou o aplicativo de amostra. Agora, configure um canal para implantar as alterações de maneira contínua e confiável.
 
-You have successfully deployed the sample application! Next, you will set up a pipeline for deploying your changes continuously and reliably.
-
-Task 8. Creating the Jenkins Pipeline
-Creating a repository to host the sample app source code
-Create a copy of the gceme sample app and push it to a Cloud Source Repository:
+Como criar um canal do Jenkins
+Como criar um repositório para hospedar o código-fonte do app de amostra
+Crie uma cópia do app de amostra gceme e envie por push ao Cloud Source Repository:
 
 gcloud source repos create default
+Ignore o aviso. Esse repositório não será cobrado.
 
-You can ignore the warning, you will not be billed for this repository.
+Teste a tarefa concluída
+Clique em Verificar meu progresso para analisar a tarefa realizada. Se o repositório de origem tiver sido criado corretamente, você verá uma pontuação de avaliação.
 
-Test completed task
-
-Click Check my progress to verify your performed task. If you have successfully created a source repository you will see an assessment score.
-
-Create a repository
+Crie um repositório
 git init
-
-Initialize the sample-app directory as its own Git repository:
+Inicialize o diretório sample-app como o próprio repositório Git:
 
 git config credential.helper gcloud.sh
-
-Run the following command:
+Execute este comando:
 
 git remote add origin https://source.developers.google.com/p/$DEVSHELL_PROJECT_ID/r/default
+Defina o nome de usuário e o endereço de e-mail para as confirmações do Git. Substitua [EMAIL_ADDRESS] pelo endereço de e-mail do Git e [USERNAME] pelo nome de usuário do Git:
 
-Set the username and email address for your Git commits. Replace [EMAIL_ADDRESS] with your Git email address and [USERNAME] with your Git username:
-
-git config --global user.email "arnom.maciel@g.globo"
-
-git config --global user.name "arnom.maciel"
-
-Add, commit, and push the files:
+git config --global user.email "[EMAIL_ADDRESS]"
+git config --global user.name "[USERNAME]"
+Adicione, confirme e envie os arquivos por push:
 
 git add .
-205800Git
 git commit -m "Initial commit"
-
 git push origin master
+Como adicionar as credenciais da conta de serviço
+Configure as credenciais para permitir que o Jenkins acesse o repositório do código. O Jenkins usará as credenciais da conta de serviço do seu cluster para fazer o download do código do Cloud Source Repositories.
 
-Adding your service account credentials
-Configure your credentials to allow Jenkins to access the code repository. Jenkins will use your cluster's service account credentials in order to download code from the Cloud Source Repositories.
+Etapa 1: Na interface de usuário do Jenkins, clique em Manage Jenkins na navegação a esquerda e clique em Manage Credentials.
 
-Step 1: In the Jenkins user interface, click Manage Jenkins in the left navigation then click Manage Credentials.
+Etapa 2: clique em Jenkins stored_scoped_cred.png
 
-Step 2: Click Jenkins
+Etapa 3: clique em Global credentials (unrestricted).
 
-Credentials page
+Etapa 4: clique em Add Credentials no painel de navegação à esquerda.
 
-Step 3: Click Global credentials (unrestricted).
+Etapa 5: selecione Google Service Account from metadata na lista suspensa Kind e clique em OK.
 
-Step 4: Click Add Credentials in the left navigation.
+As credenciais globais foram adicionadas. O nome da credencial é ID do projeto, encontrado na seção DETALHES DA CONEXÃO do laboratório.
 
-Step 5: Select Google Service Account from metadata from the Kind drop-down and click OK.
+global_cred.png
 
-The global credentials has been added. The name of the credential is the Project ID found in the CONNECTION DETAILS section of the lab.
+Como criar o job do Jenkins
 
-Global credentials (unrestricted) page
+Navegue até a interface do usuário do Jenkins e siga estas etapas para configurar um job de canal.
 
-Configure Jenkins Cloud for Kubernetes
-In the Jenkins user interface, select Manage Jenkins > Manage nodes and clouds.
+Etapa 1: clique em New Item no painel de navegação à esquerda:
 
-Click Configure Clouds in the left navigation pane.
+86e92964a4599231.png
 
-Click Add a new cloud and select Kubernetes.
+Etapa 2: nomeie o projeto como sample-app, escolha a opção Multibranch Pipeline e clique em OK.
 
-Click Kubernetes Cloud Details.
+Etapa 3: na próxima página, na seção Branch Sources, clique em Add Source e selecione git.
 
-In the Jenkins URL field, enter the following value: http://cd-jenkins:8080
-
-In the Jenkins tunnel field, enter the following value: cd-jenkins-agent:50000
-
-Click Save.
-
-Creating the Jenkins job
-Navigate to your Jenkins user interface and follow these steps to configure a Pipeline job.
-
-Step 1: Click Dashboard > New Item in the left panel.
-
-Step 2: Name the project sample-app, then choose the Multibranch Pipeline option and click OK.
-
-Step 3: On the next page, in the Branch Sources section, click Add Source and select git.
-
-Step 4: Paste the HTTPS clone URL of your sample-app repo in Cloud Source Repositories into the Project Repository field. Replace [PROJECT_ID] with your Project ID:
+Etapa 4: no campo Project Repository, cole o URL do clone HTTPS do repositório sample-app no Cloud Source Repositories. Substitua [PROJECT_ID] pelo ID do projeto:
 
 https://source.developers.google.com/p/[PROJECT_ID]/r/default
+Etapa 5: na lista suspensa Credentials, selecione o nome das credenciais que você criou ao adicionar sua conta de serviço nas etapas anteriores.
 
-Step 5: From the Credentials drop-down, select the name of the credentials you created when adding your service account in the previous steps.
+Etapa 6: na seção Scan Multibranch Pipeline Triggers, marque a caixa Periodically if not otherwise run e defina o valor de Interval como 1 minuto.
 
-Step 6: Under Scan Multibranch Pipeline Triggers section, check the Periodically if not otherwise run box and set the Interval value to 1 minute.
+Etapa 7: a configuração do seu job ficará assim:
 
-Step 7: Your job configuration should look like this:
+branch_source_jenkins.png
 
-Branch Sources section
+build_conf_jenkins.png
 
-Build Configuration section
+Etapa 8: clique em Save e mantenha as definições padrão das outras opções.
 
-Step 8: Click Save leaving all other options with their defaults.
+Depois que você concluir essas etapas, um job denominado Branch indexing será executado. Esse "meta-job" identifica os branches do repositório e garante que não ocorreram alterações neles. Se você clicar no sample-app no canto superior esquerdo, o job mestre será exibido.
 
-After you complete these steps, a job named Branch indexing runs. This meta-job identifies the branches in your repository and ensures changes haven't occurred in existing branches. If you click sample-app in the top left, the master job should be seen.
+Observação: a primeira execução do job mestre poderá falhar enquanto você não fizer algumas alterações no código na próxima etapa.
 
-Note: The first run of the master job might fail until you make a few code changes in the next step.
+O canal do Jenkins está pronto. Em seguida, você criará o ambiente de desenvolvimento para integração contínua.
 
-You have successfully created a Jenkins pipeline! Next, you'll create the development environment for continuous integration.
+Como criar o ambiente de desenvolvimento
+Um branch de desenvolvimento é um conjunto de ambientes que os desenvolvedores usam para testar as alterações no código antes de enviá-las para integração ao site ativo. Esses ambientes são versões reduzidas do aplicativo, mas precisam ser implantados com os mesmos mecanismos do ambiente ativo.
 
-Task 9. Creating the development environment
-Development branches are a set of environments your developers use to test their code changes before submitting them for integration into the live site. These environments are scaled-down versions of your application, but need to be deployed using the same mechanisms as the live environment.
+Crie um branch de desenvolvimento
+Para criar um ambiente de desenvolvimento em um branch de recursos, você pode enviá-lo por push ao servidor Git e deixar o Jenkins implantar o ambiente.
 
-Creating a development branch
-To create a development environment from a feature branch, you can push the branch to the Git server and let Jenkins deploy your environment.
-
-Create a development branch and push it to the Git server:
+Crie um branch de desenvolvimento e envie-o por push ao servidor Git:
 
 git checkout -b new-feature
+Como modificar a definição do pipeline
+O Jenkinsfile que define o pipeline é escrito com a sintaxe do Groovy para pipelines do Jenkins (página em inglês). Com um Jenkinsfile, é possível expressar todo um pipeline de versão em um único arquivo que coexiste com o código-fonte. Os canais são compatíveis com recursos eficientes, como o carregamento em paralelo, e exigem a aprovação manual do usuário.
 
-Modifying the pipeline definition
-The Jenkinsfile that defines that pipeline is written using the Jenkins Pipeline Groovy syntax. Using a Jenkinsfile allows an entire build pipeline to be expressed in a single file that lives alongside your source code. Pipelines support powerful features like parallelization and require manual user approval.
+Para que o canal funcione como esperado, é preciso modificar o Jenkinsfile para definir o código do seu projeto.
 
-In order for the pipeline to work as expected, you need to modify the Jenkinsfile to set your project ID.
-
-Open the Jenkinsfile in your terminal editor, for example vi:
+Abra o Jenkinsfile no seu editor de terminal, por exemplo, vi:
 
 vi Jenkinsfile
-
-Start the editor:
+Inicie o editor:
 
 i
-
-Add your PROJECT_ID to the REPLACE_WITH_YOUR_PROJECT_ID value. (Your PROJECT_ID is your Project ID found in the CONNECTION DETAILS section of the lab. You can also run gcloud config get-value project to find it.
-
-Change the value of CLUSTER_ZONE to <filled in at lab start> . You can get this value by running gcloud config get compute/zone.
+Adicione o PROJECT_ID ao valor REPLACE_WITH_YOUR_PROJECT_ID. (O PROJECT_ID é o ID do projeto encontrado na seção DETALHES DA CONEXÃO do laboratório. Você também pode executar o comando gcloud config get-value project para encontrá-lo:
 
 PROJECT = "REPLACE_WITH_YOUR_PROJECT_ID"
 APP_NAME = "gceme"
 FE_SVC_NAME = "${APP_NAME}-frontend"
 CLUSTER = "jenkins-cd"
-CLUSTER_ZONE = ""
+CLUSTER_ZONE = "us-east1-d"
 IMAGE_TAG = "gcr.io/${PROJECT}/${APP_NAME}:${env.BRANCH_NAME}.${env.BUILD_NUMBER}"
 JENKINS_CRED = "${PROJECT}"
-Save the Jenkinsfile file: hit Esc then (for vi users):
+Salve o arquivo Jenkinsfile pressionando a tecla Esc, depois (para usuários do vi):
 
 :wq
+Modifique o site
+Para demonstrar como alterar o aplicativo, mude a cor dos cards do gceme de azul para laranja.
 
-Modify the site
-To demonstrate changing the application, you will change the gceme cards from blue to orange.
-
-Open html.go:
+Abra o html.go:
 
 vi html.go
-
-Start the editor:
+Inicie o editor:
 
 i
-
-Change the two instances of <div class="card blue"> with following:
+Altere as duas instâncias de <div class="card blue"> com o seguinte código:
 
 <div class="card orange">
-Save the html.go file: press Esc then:
+Salve o arquivo html.go pressionando a tecla Esc, depois:
 
 :wq
-
-Open main.go:
+Abra o main.go:
 
 vi main.go
-
-Start the editor:
+Inicie o editor:
 
 i
+A versão é definida nesta linha:
 
-The version is defined in this line:
 const version string = "1.0.0"
-Update it to the following:
+Atualize-a para:
 
 const version string = "2.0.0"
-Save the main.go file one more time: Esc then:
+Salve o arquivo main.go novamente pressionando a tecla Esc, depois:
 
 :wq
-
-Task 10. Kick off Deployment
-Commit and push your changes:
+Inicie a implantação
+Confirme e envie suas alterações por push:
 
 git add Jenkinsfile html.go main.go
-
 git commit -m "Version 2.0.0"
-
 git push origin new-feature
+Isso iniciará a criação do seu ambiente de desenvolvimento.
 
-This will kick off a build of your development environment.
+Depois de enviar a alteração por push ao repositório Git, navegue até a interface do usuário do Jenkins. Você verá que a criação do branch new-feature foi iniciada. Pode levar até um minuto para que as alterações sejam detectadas.
 
-After the change is pushed to the Git repository, navigate to the Jenkins user interface where you can see that your build started for the new-feature branch. It can take up to a minute for the changes to be picked up.
+Depois que a versão estiver em execução, clique na seta para baixo ao lado do build na navegação à esquerda e selecione Console Output:
 
-After the build is running, click the down arrow next to the build in the left navigation and select Console output:
-Navigation pane
+6ea3b2ed776e3b29.png
 
-Track the output of the build for a few minutes and watch for the kubectl --namespace=new-feature apply... messages to begin. Your new-feature branch will now be deployed to your cluster.
-Note: In a development scenario, you wouldn't use a public-facing load balancer. To help secure your application, you can use kubectl proxy. The proxy authenticates itself with the Kubernetes API and proxies requests from your local machine to the service in the cluster without exposing your service to the Internet.
+Acompanhe a resposta da versão por alguns minutos e aguarde o início das mensagens kubectl --namespace=new-feature apply.... Agora, o branch new-feature será implantado no seu cluster.
 
-If you didn't see anything in Build Executor, not to worry. Just go to the Jenkins homepage > sample app. Verify that the new-feature pipeline has been created.
+Observação: em um cenário de desenvolvimento, você não usaria um balanceador de carga voltado para o público. Para proteger o aplicativo, você pode usar o proxy kubectl. O proxy faz a própria autenticação com a API Kubernetes e retransmite as solicitações da máquina local para o serviço no cluster sem expor seu serviço à Internet.
 
-Once that's all taken care of, start the proxy in the background:
+Se nada for exibido em Build Executor, não se preocupe. Acesse a página inicial do Jenkins --> app de amostra. Verifique se o pipeline new-feature foi criado.
+
+Assim que tudo estiver pronto, inicie o proxy em segundo plano:
 
 kubectl proxy &
-
-If it stalls, press Ctrl + C to exit out. Verify that your application is accessible by sending a request to localhost and letting kubectl proxy forward it to your service:
+Se o processo parar, pressione as teclas Ctrl + C para sair. Verifique se o aplicativo pode ser acessado enviando uma solicitação para localhost e permitindo que o proxy kubectl o encaminhe para seu serviço:
 
 curl \
 http://localhost:8001/api/v1/namespaces/new-feature/services/gceme-frontend:80/proxy/version
+Você verá a resposta "2.0.0", que é a versão em uso no momento.
 
-You should see it respond with 2.0.0, which is the version that is now running.
-
-If you receive a similar error:
+Se você receber um erro semelhante a este:
 
 {
   "kind": "Status",
@@ -419,51 +363,43 @@ If you receive a similar error:
   "message": "no endpoints available for service \"gceme-frontend:80\"",
   "reason": "ServiceUnavailable",
   "code": 503
-It means your frontend endpoint hasn't propagated yet—wait a little bit and try the curl command again. Move on when you get the following output:
+Isso significa que o endpoint do front-end ainda não foi propagado. Aguarde um pouco e tente o comando curl novamente. Prossiga quando receber a seguinte resposta:
+
 2.0.0
-You have set up the development environment! Next, you will build on what you learned in the previous module by deploying a canary release to test out a new feature.
+Pronto. Você configurou o ambiente de desenvolvimento. Agora, você usará o que aprendeu no módulo anterior para implantar uma versão canário e testar um novo recurso.
 
-Task 11. Deploying a canary release
-You have verified that your app is running the latest code in the development environment, so now deploy that code to the canary environment.
+Como implantar uma versão canário
+Você confirmou que seu app está executando o código mais recente no ambiente para desenvolvedores. Agora, implante esse código no ambiente canário.
 
-Create a canary branch and push it to the Git server:
+Crie um branch canário e envie-o por push para o servidor Git:
 
 git checkout -b canary
-
 git push origin canary
-
-In Jenkins, you should see the canary pipeline has kicked off. Once complete, you can check the service URL to ensure that some of the traffic is being served by your new version. You should see about 1 in 5 requests (in no particular order) returning version 2.0.0.
+No Jenkins, você verá que o pipeline canário foi iniciado. Depois de concluído, verifique o URL de serviço para garantir que parte do tráfego seja atendido pela nova versão. O esperado é que cerca de 1 em cada 5 solicitações (sem ordem específica) retorne a versão 2.0.0.
 
 export FRONTEND_SERVICE_IP=$(kubectl get -o \
 jsonpath="{.status.loadBalancer.ingress[0].ip}" --namespace=production services gceme-frontend)
-
 while true; do curl http://$FRONTEND_SERVICE_IP/version; sleep 1; done
+Se você continuar vendo a versão 1.0.0, tente executar os comandos acima novamente. Depois de garantir que está tudo certo, encerre o comando com Ctrl + C.
 
-If you keep seeing 1.0.0, try running the above commands again. Once you've verified that the above works, end the command with Ctrl + C.
-That's it! You have deployed a canary release. Next you will deploy the new version to production.
+Pronto. Você implantou uma versão canário. Agora, implante a nova versão na produção.
 
-Task 12. Deploying to production
-Now that our canary release was successful and we haven't heard any customer complaints, deploy to the rest of your production fleet.
+Como implantar a versão na produção
+Agora que a versão canário está pronta e não houve reclamações de clientes, implante-a no restante da sua frota de produção.
 
-Create a canary branch and push it to the Git server:
+Crie um branch canário e envie-o por push para o servidor Git:
 
 git checkout master
-
 git merge canary
-
 git push origin master
-
-In Jenkins, you should see the master pipeline has kicked off.
-
-Once complete (which may take a few minutes), you can check the service URL to ensure that all of the traffic is being served by your new version, 2.0.0.
+No Jenkins, você verá que o pipeline mestre foi iniciado. Depois de concluído (o que pode levar alguns minutos), verifique o URL de serviço para garantir que parte do tráfego está sendo atendida pela nova versão, 2.0.0.
 
 export FRONTEND_SERVICE_IP=$(kubectl get -o \
 jsonpath="{.status.loadBalancer.ingress[0].ip}" --namespace=production services gceme-frontend)
-
 while true; do curl http://$FRONTEND_SERVICE_IP/version; sleep 1; done
+Mais uma vez, se você vir instâncias de 1.0.0, tente executar os comandos acima novamente. Se quiser parar esse comando, pressione Ctrl + C.
 
-Once again, if you see instances of 1.0.0 try running the above commands again. You can stop this command by pressing Ctrl + C.
-Example output:
+Exemplo de resposta:
 
 gcpstaging9854_student@qwiklabs-gcp-df93aba9e6ea114a:~/continuous-deployment-on-kubernetes/sample-app$ while true; do curl http://$FRONTEND_SERVICE_IP/version; sleep 1; done
 2.0.0
@@ -473,38 +409,10 @@ gcpstaging9854_student@qwiklabs-gcp-df93aba9e6ea114a:~/continuous-deployment-on-
 2.0.0
 2.0.0
 ^C
-You can also navigate to site on which the gceme application displays the info cards. The card color changed from blue to orange.
-
-Here's the command again to get the external IP address so you can check it out:
+Você também pode navegar para o site em que o aplicativo gceme exibe os cards de informações. A cor do card mudou de azul para laranja. Veja abaixo o comando que foi usado para consultar o endereço IP externo e confira a mudança:
 
 kubectl get service gceme-frontend -n production
+Exemplo de resposta:
 
-Example output:
-
-Backend that serviced this request page
-
-Task 13. Test your Understanding
-Below are multiple-choice questions to reinforce your understanding of this lab's concepts. Answer them to the best of your abilities.
-
-Which are the following Kubernetes namespaces used in the lab?
-
-default
-
-production
-
-jenkins
-
-kube-system
-
-helm
-
-
-The Helm chart is a collection of files that describe a related set of Kubernetes resources.
-
-True
-
-False
-You're done!
-
-Awesome job, you have successfully deployed your application to production!
-
+orange_card.png
+https://cdn.qwiklabs.com/nFJlHtZPI%2F8HvtCNSGRmCyqRkMDylftq%2F200xRXtUKc%3D
